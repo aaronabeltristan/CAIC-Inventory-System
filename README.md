@@ -2,7 +2,7 @@
 
 A voucher and disbursement system for **Calamba Allied Industrial Corporation**: projects, check voucher entries, approvals, an activity log, and an AI assistant that answers questions about the records. Backend in **FastAPI** with **PostgreSQL**, frontend in **React** (Vite), all running in **Docker** on one shared server, plus a local AI model through **Ollama**.
 
-This README covers the `feature/activity-log-archiving` branch: how to use, develop and deploy the system, and every change made between October 30 and November 1, 2026 (what was added, how it behaves, database and API changes, and how to test it).
+This README covers the `feature/settings-and-purchase-orders` branch (which includes all of `feature/activity-log-archiving`): how to use, develop and deploy the system, and every change made from October 30 to November 16, 2026 (what was added, how it behaves, database and API changes, and how to test it). The November 16 changes are summarised in [What's new](#whats-new-november-16-2026).
 
 **Quick start**
 
@@ -12,6 +12,7 @@ This README covers the `feature/activity-log-archiving` branch: how to use, deve
 
 **Contents**
 
+0. [What's new (November 16, 2026)](#whats-new-november-16-2026)
 1. [Summary](#1-summary)
 2. [Running, developing and deploying](#2-running-developing-and-deploying)
    - Using the app
@@ -25,7 +26,7 @@ This README covers the `feature/activity-log-archiving` branch: how to use, deve
    - 4.3 Change requests (archive and edit)
    - 4.4 Archiving (soft delete)
    - 4.5 Project archiving
-   - 4.6 Automatic permanent deletion after 30 days
+   - 4.6 Automatic permanent deletion (30 days by default)
    - 4.7 Activity Log
    - 4.8 Password reset from the login page
    - 4.9 User management
@@ -35,6 +36,11 @@ This README covers the `feature/activity-log-archiving` branch: how to use, deve
    - 4.13 Edit-conflict protection
    - 4.14 Assistant (local AI model)
    - 4.15 Shared app link, versions and deploys
+   - 4.16 – 4.20 Profile, one device at a time, sign-out after inactivity, User Guides, Active Status, mobile view, backups, security
+   - 4.21 Settings page (admins)
+   - 4.22 Purchase orders (PO) on projects
+   - 4.23 PO and CV numbers: numbers only
+   - 4.24 Search and filters
 5. [Database changes](#5-database-changes)
 6. [API reference](#6-api-reference)
 7. [Activity Log action reference](#7-activity-log-action-reference)
@@ -45,6 +51,33 @@ This README covers the `feature/activity-log-archiving` branch: how to use, deve
 
 ---
 
+## What's new (November 16, 2026)
+
+| Area | Before | Now | Details |
+|---|---|---|---|
+| **Settings** | Behaviour fixed in code or in `Backend\.env` | A **Settings** page for admins (user menu → Settings) with tabs **Manage Users, Security, Requests, System, Company** | [4.21](#421-settings-page-admins) |
+| Days before archived items are deleted | Always 30 | Set by admins (1–365, default 30), with a warning before shortening | [4.6](#46-automatic-permanent-deletion-30-days-by-default) |
+| Manage Users | A tab in the User Panel | Moved to **Settings → Manage Users** (the waiting-accounts badge moved with it) | [4.9](#49-user-management) |
+| Sign-in and security | `.env` values only | Lockout, sign-out after inactivity, one device per account, Create account / Forgot password on or off, sign-up limits: all in **Settings → Security** | [4.21](#421-settings-page-admins) |
+| Staff edits | Always needed approval | Admins choose: approval needed, or applied straight away (logged); reason optional or required | [4.21](#421-settings-page-admins) |
+| Backups | Status in the User Panel; schedule in `.env` | Status, **Back up now** and the schedule in **Settings → System** | [4.19](#419-backups-encrypted-synced-to-google-drive) |
+| Activity Log | Kept forever | Optional clean-up of routine rows (sign-ins, exports, assistant questions); changes to records are always kept | [4.21](#421-settings-page-admins) |
+| Assistant | Always on | Everyone / admins only / off | [4.21](#421-settings-page-admins) |
+| Company details | Fixed in code | Company name, short name, logo and currency in **Settings → Company** | [4.21](#421-settings-page-admins) |
+| **Projects** | A title only | **Project title, PO number, PO amount and the PO as a PDF**, all required for a new project | [4.22](#422-purchase-orders-po-on-projects) |
+| Voucher Control | Title and total | New columns **PO NUMBER, PO AMOUNT, PO FILE** (View PDF); admins **Add PO / Edit PO** | [4.22](#422-purchase-orders-po-on-projects) |
+| PO number | — | Unique: identifies the project; no two projects share one | [4.22](#422-purchase-orders-po-on-projects) |
+| PO and CV numbers | Any text (`CV-25-0001`) | **Numbers only** (`250001`), everywhere a record is saved | [4.23](#423-po-and-cv-numbers-numbers-only) |
+| CSV import | `project_title, date, cv_no, payee, amount` | Adds `po_number, po_amount`, with per-project PO checks | [4.11](#411-csv-import) |
+| Search | Several fields at once; the search text carried into the project page | **One field at a time** (Project Title, Payee / Particulars, PO Number); opening a project clears the search | [4.24](#424-search-and-filters) |
+| Sample data | Old CSV format | New format, numbers-only PO/CV, plus a sample PO PDF | [4.11](#411-csv-import) |
+
+Not done yet, on purpose: **CV numbers can still repeat** (the "no duplicate CV" rule was postponed). See [Known issues](#11-known-issues-and-follow-ups).
+
+**Upgrading a server:** deploy as usual. New tables and columns are created when the backend starts. Settings start with the values from `Backend\.env` (or the old defaults), so nothing changes until an admin saves something.
+
+---
+
 ## 1. Summary
 
 | Area | Before | After |
@@ -52,7 +85,7 @@ This README covers the `feature/activity-log-archiving` branch: how to use, deve
 | Deleting an entry | Anyone signed in could permanently delete any entry | Entries are **archived** (hidden). Only admins archive directly; normal users send a request |
 | Editing an entry | Anyone could edit any entry; only the last editor was kept | Only admins edit directly. Normal users send an **edit request**. Every edit is logged with old → new values |
 | Projects | Could not be removed | Admins can **archive** a project together with all its entries |
-| Archived items | — | Restorable for **30 days**, then **deleted permanently** by the backend |
+| Archived items | — | Restorable for **30 days** (admins can change it in Settings), then **deleted permanently** by the backend |
 | History | None | **Activity Log** records every action, kept forever |
 | Forgotten password | No way to recover | **Forgot password?** on the login page; an admin approves and hands over a temporary password |
 | Accounts | Managed only through the database | **Manage Users** screen: rename, change role, deactivate, reset password, delete |
@@ -310,7 +343,7 @@ Entries are no longer erased when "deleted":
 - Archived entries disappear from the project, from Voucher Control and from every total.
 - An archived entry can't be edited, and can't receive new requests.
 - Admins restore entries in **Activity Log → Archived → Entries**.
-- The old hard-delete function in `crud.py` was removed, so nothing in the code can erase an entry directly. Only the 30-day purge removes data (see 4.6).
+- The old hard-delete function in `crud.py` was removed, so nothing in the code can erase an entry directly. Only the automatic purge removes data (see 4.6).
 
 ### 4.4a Several at once, and deleting archived items now
 
@@ -319,9 +352,9 @@ Entries are no longer erased when "deleted":
   - **Staff: Request archive.** A reason is required. One request per entry goes to the admins; entries that already have a pending request are skipped.
 - **Tick several projects** in *Voucher Control* (admins): **Archive selected** archives each with all its entries. The confirmation lists them and the number of entries.
 - **Activity Log > Archived** (admins): tick projects or entries, then **Restore selected** or **Delete permanently**. Each row also has **Restore** and **Delete**.
-  - **Delete permanently** erases the items now instead of after 30 days (a project together with all its entries). It can't be undone: you have to type **DELETE** to confirm. The Activity Log keeps a full copy of what was deleted (*Deleted permanently (by admin)*). Only archived items can be deleted.
+  - **Delete permanently** erases the items now instead of after the retention period (a project together with all its entries). It can't be undone: you have to type **DELETE** to confirm. The Activity Log keeps a full copy of what was deleted (*Deleted permanently (by admin)*). Only archived items can be deleted.
 - Items that can't be done (already archived, not found, project still archived...) are skipped. The message says how many went through and why the rest were skipped, e.g. *"5 entries archived. 1 skipped: CV# A1 is already archived."*
-- API (`bulk.py`): `POST /disbursements/bulk-archive`, `/disbursements/bulk-archive-request`, `/projects/bulk-archive`, `/archived/restore`, `/archived/delete`. Up to 500 items per call. The 30-day purge and the single-item restore routes use the same code (`activity.py`).
+- API (`bulk.py`): `POST /disbursements/bulk-archive`, `/disbursements/bulk-archive-request`, `/projects/bulk-archive`, `/archived/restore`, `/archived/delete`. Up to 500 items per call. The automatic purge and the single-item restore routes use the same code (`activity.py`).
 
 ### 4.5 Project archiving
 
@@ -332,15 +365,17 @@ Entries are no longer erased when "deleted":
 - An entry inside an archived project can't be restored on its own. Restore the project instead.
 - While a project is archived, nobody can create a project or add an entry with the same title. The error message explains that it's archived and can be restored.
 
-### 4.6 Automatic permanent deletion after 30 days
+### 4.6 Automatic permanent deletion (30 days by default)
 
-- Anything archived for more than **30 days** (single entries, or projects together with their entries) is **deleted permanently**.
+- Anything archived for longer than the **retention period** (single entries, or projects together with their entries) is **deleted permanently**. The period is **30 days** by default; admins change it in **Settings → System → Archived items** (1 to 365 days). It applies to items already archived too.
+- When an admin types a shorter period, Settings warns how many archived projects and entries are already older than that (they're deleted within the hour after saving), so they can be restored first.
+- On a laptop pointed at the real database for testing, `PURGE_ENABLED=false` in `Backend\.env` turns the automatic deletion off (and the Activity Log clean-up, 4.21). The deployed server never reads it.
 - The backend runs this check at startup and then **every hour** (`purge_once` in `auth.py`, `purge_expired` in `activity.py`).
 - Each deletion writes a **Deleted permanently** row to the Activity Log containing a copy of the removed data: project title, entries with date, CV no., payee and amount, and who archived it and when.
 - The Archived tab shows a countdown for each item ("23 days left"), in red during the last 7 days. Hovering shows the exact deletion date and time.
 - If several copies of the backend run at once, they may try to purge the same rows. A failed attempt is rolled back and skipped, so this is safe.
 
-> **Record retention:** financial records are gone for good 30 days after archiving, apart from the copy kept in the Activity Log. Check whether your organization has a longer retention requirement for vouchers.
+> **Record retention:** financial records are gone for good once the retention period after archiving is over, apart from the copy kept in the Activity Log. Check whether your organization has a longer retention requirement for vouchers.
 
 ### 4.7 Activity Log
 
@@ -373,7 +408,7 @@ Accounts have no email address, so resets are approved by an admin:
 
 ### 4.9 User management
 
-Admins open **Manage Users** from the user menu (top right).
+Admins open **Settings → Manage Users** (user menu at the top right → **Settings**). It used to be a tab in the User Panel; the red badge for accounts and name changes waiting for approval now shows on **Settings** in the menu and on the Manage Users tab.
 
 **New accounts need an admin's approval.** An account made with **Create account** on the sign-in page starts as **Waiting for approval**: the person sees "Account created. An admin has to approve it before you can sign in.", and signing in says the account is waiting until it's approved (only after a correct password, so it doesn't reveal which usernames exist). Admins get a red badge on their avatar and on **Manage Users**; waiting accounts are listed first with a **Review** button:
 
@@ -417,13 +452,21 @@ Deactivating is usually better than deleting: if a deleted username is registere
 | Check | Rule |
 |---|---|
 | Required | project title, date, CV#, payee and amount must not be empty |
+| PO and CV numbers | numbers only (0-9) |
+| Purchase order | the rows of one project must give the same `po_number` and `po_amount` (blank is fine on some rows); a **new** project needs both; a PO number already used by another project (archived ones included), or given for two projects in the file, is rejected; rows for an existing project may repeat its PO or leave it blank, but not give a different one; an older project without a PO gets the one in the file |
 | Dates | `YYYY-MM-DD`, `MM/DD/YYYY` and `Oct 30, 2026` are accepted; day-first dates (`30/10/2026`) are rejected rather than guessed |
 | Amounts | `₱12,500.50`-style values are cleaned; zero, negative, text, more than 2 decimals, and over ₱99,999,999.99 are rejected |
 | CV numbers | A CV# already in the system, or repeated in the file, is rejected, so importing the same file twice adds nothing |
 | Projects | Titles match existing projects regardless of capitalisation; rows for an archived project are rejected |
 | File | UTF-8 or Excel's plain "CSV" encoding; at most 5 MB and 10,000 rows |
 
-Test files are in `sample_data/`: `disbursements_import_sample.csv` (100 projects, 829 valid rows, ₱159M) and `disbursements_import_errors.csv` (13 rows: 3 valid, 10 with one problem each).
+Test files are in `sample_data/`:
+
+- `disbursements_import_sample.csv`: 100 projects, 829 valid rows, ₱159M. Each project has a PO number (`20250001` … `20260100`) and a PO amount about 18% above what it spent; CV numbers run `250001` … `260415`.
+- `disbursements_import_errors.csv`: 20 rows covering every check above, including the PO rules (new project without a PO, missing PO amount, two PO numbers in one project, a PO of another project, a PO with letters, a text PO amount). The row with CV `250001` is reported as "already exists" once the sample has been imported.
+- `PO_20250001_sample.pdf`: a sample purchase order (marked SAMPLE) for the first project, *Calamba Training Center Drainage Improvement*, PO 20250001, ₱1,030,000.00, to try **Edit PO** and **View PDF**.
+
+A CSV can't hold the PO files: after an import, attach each project's PDF with **Edit PO**. **Excel caution:** opening and saving a CSV in Excel drops leading zeros (`000123` → `123`) and may write long numbers as `2.03E+07`; edit in a text editor or format those columns as Text first.
 
 ### 4.12 Live updates
 
@@ -520,7 +563,7 @@ Everyone's **User Panel** (menu at the top right) shows their profile card:
 - **Name:** **Edit** next to the name.
   - **Staff** send a request (**Request change**). The card shows *Waiting for approval: <new name>* with **Withdraw**; sending another request replaces the waiting one. If an admin rejects it, the card says so (with the admin's note) for 14 days.
   - **Admins** change their own name straight away (logged as *Changed name*).
-- **Admins review** name changes in **User Panel > Manage Users**, above the user list, with an optional note. They're counted in the red badges (menu button, User Panel, Manage Users tab). An admin can't review their own request.
+- **Admins review** name changes in **Settings → Manage Users**, above the user list, with an optional note. They're counted in the red badges (menu button, Settings, Manage Users tab). An admin can't review their own request.
 - **Your numbers** (cards at the top of the right side, for everyone): entries you added this month and their total, all your entries with their total and how many projects they're in, edits this month (admins) or edit requests this month (staff), and your requests (pending / approved / rejected). Admins also see how many requests they reviewed this month. Counts only active entries in active projects; "this month" follows Philippine time (`GET /me/stats`).
 - **My Activity** (a tab for everyone): what you did in the app, plus what admins did to your account (password reset, name approved…), newest first, 20 at a time with **Show more**. Questions to the assistant aren't included.
 - **Sign-in security** (on the profile card): your previous sign-in, wrong passwords for your username since then (highlighted in red, with a hint, if there were any), wrong passwords in the last 30 days, and when the password was last changed and by whom. **Sign out on all devices** ends every session of the account, this one included: each account has a `token_version` that's put in its sign-in tokens, and this raises it, so older tokens are refused (`401`) and open live connections close.
@@ -604,7 +647,9 @@ A `backup` container (`Backend/backup/backup.sh`) backs up the whole database ev
 - **Kept:** `backups\daily` (last 7), `backups\weekly` (4), `backups\monthly` (6). Older ones are deleted automatically. Manual backups go to `backups\manual` and aren't deleted.
 - **Where:** the `backups` folder next to `deploy.ps1` (or `BACKUP_DIR` in `Backend\.env`). It's ignored by Git.
 - **Google Drive:** install **Google Drive for desktop** on the server and sign in with the account that should hold the backups. In its settings, go to **Folders from your computer > Add folder**, choose the `backups` folder, and select **Sync with Google Drive**. Each new backup is then uploaded, and old ones are removed from Drive when they're rotated out (they stay in Drive's trash for 30 days).
-- **In the app:** each backup is logged (*Backup saved* / *Backup FAILED*, record type *Backups*). Admins see the status on their profile card in the User Panel: green when the last backup was within a day, yellow when it's older, red when the last one failed.
+- **In the app:** each backup is logged (*Backup saved* / *Backup FAILED*, record type *Backups*). Admins see the status in **Settings → System → Backups** (it used to be on the User Panel profile card): green when the last backup was within a day, yellow when it's older, red when the last one failed.
+- **Schedule from the app:** the backup hour and how many daily, weekly and monthly backups to keep are set in **Settings → System**. `BACKUP_HOUR` and `BACKUP_KEEP_*` in `Backend\.env` are only the starting values. The backup container reads the settings every minute.
+- **Back up now** (Settings → System) asks the backup container for an extra backup; it starts within a minute (saved under `backups\manual`) and the result shows in the status. **Restoring** is still done on the server with `restore.ps1` (below); it isn't in the app.
 
 **By hand** (PowerShell, project folder):
 
@@ -618,6 +663,63 @@ A `backup` container (`Backend/backup/backup.sh`) backs up the whole database ev
 A restore without `-ReplaceLive` goes into a separate database, `caic_db_restore` (open it in pgAdmin to check), and doesn't touch the real data. With `-ReplaceLive`, after you type YES, it backs up the current data, swaps in the restored copy, keeps the old database as `caic_db_replaced_<date>`, and restarts the backend. **Test a restore once a month**: it's the only way to know the backups work.
 
 To restore a file from Google Drive on another computer, put it in that server's `backups` folder (same `BACKUP_PASSPHRASE` in its `.env`) and use `restore.ps1` the same way.
+
+### 4.21 Settings page (admins)
+
+Admins open **Settings** from the user menu (top right). It has five tabs. Each tab is one form: change what you need, then **Save changes** (or **Reset** to undo before saving). Every save is checked by the backend (nothing is saved if one value is wrong), written to the Activity Log as **Changed settings** with old → new values, and reaches every open screen within a few seconds (live updates). Staff don't see the page.
+
+| Tab | Setting | Default | Notes |
+|---|---|---|---|
+| **Manage Users** | — | — | The former User Panel tab: name-change requests, then the user list (see 4.9) |
+| **Security** | Wrong passwords before an account is locked | 5 (`LOGIN_MAX_FAILURES`) | 3–20 |
+| | Lock the account for (minutes) | 15 (`LOGIN_LOCK_MINUTES`) | 1–1440 |
+| | Sign out after inactivity (minutes) | 30 (`SESSION_IDLE_MINUTES`) | 5–480; applies from the next sign-in or renewal |
+| | One signed-in device per account | on (`SINGLE_SESSION`) | 4.17 |
+| | Accounts that may be signed in on several devices | `SINGLE_SESSION_EXEMPT` | usernames, comma-separated |
+| | Allow "Create account" on the sign-in page | on | off hides the link and the backend refuses sign-ups |
+| | Allow "Forgot password" requests | on | off hides the link; admins reset passwords in Manage Users |
+| | New accounts per hour from one address / in total | 10 / 30 | `REGISTER_*_PER_HOUR` |
+| | Most accounts waiting for approval | 50 (`MAX_WAITING_ACCOUNTS`) | |
+| **Requests** | Staff edits need an admin's approval | on | off: a staff edit is applied straight away, logged as *Edited entry*, and shown as approved ("Applied straight away") in My Requests. Archiving always needs approval |
+| | Staff must give a reason for edit requests | off | |
+| **System** | Delete archived items permanently after (days) | 30 | 1–365, with a warning before shortening (4.6) |
+| | Delete routine Activity Log rows after (days) | 0 (keep everything) | 0, or 30 and more. Removes sign-ins, sign-outs, failed sign-ins, device prompts, exports, assistant questions and backup requests; changes to records, requests, accounts and settings are always kept |
+| | Chat assistant | Everyone | Everyone / Admins only / Off (the chat bubble disappears; `/chat` answers 403) |
+| | Daily backup time (hour), backups to keep (daily / weekly / monthly) | 2 / 7 / 4 / 6 | read by the backup container every minute (4.19) |
+| | Backups | — | Status of the last backup and **Back up now** |
+| **Company** | Logo | built-in | PNG, JPEG or WebP up to 1 MB; shown at the top of every page and on the sign-in page; **Use the built-in logo** goes back |
+| | Company name | Calamba Allied Industrial Corporation | sign-in page, exports, the assistant |
+| | Short name | CAIC | browser tab title, the assistant |
+| | Currency | Philippine peso | PHP, USD, EUR, JPY, SGD, HKD, AUD, GBP. Changes how amounts are **shown** (app, Excel export, new Activity Log entries, the assistant); amounts are never converted |
+
+**How it works.** The settings and their limits are defined in one place, `Backend/app_settings.py`; the Settings page builds its fields from that list, so a new setting added there appears on the page by itself. Saved values are in the `app_settings` table; a saved value wins over `Backend\.env`, which now only gives the **starting values**. Each backend process reads the settings at most every 5 seconds. Who can read what: the sign-in page reads the public ones without signing in (company name, logo, Create account / Forgot password on or off), signed-in users read the ones the screens need (archive period, idle minutes, assistant on/off, staff-edit rules, currency), and admins read everything. Secrets and addresses (`JWT_SECRET_KEY`, `DATABASE_URL`, passwords, `BACKUP_PASSPHRASE`, `CORS_ORIGINS`…) are never settings.
+
+### 4.22 Purchase orders (PO) on projects
+
+Every project has a **purchase order**: what was agreed or approved for the project. It is separate from the disbursements: the **PO amount** is typed once, the **total disbursement amount** is added up from the project's entries.
+
+- **Creating a project** (admins and staff, **+ Create new project**) needs all four: **Project title**, **PO number**, **PO amount** and the **PO file** (PDF only, up to 10 MB; the file must really be a PDF, whatever its name).
+- **The PO number identifies the project:** no two projects can have the same one, archived projects included. The database enforces it (unique index), and the message names the project that already uses it.
+- **Voucher Control** shows **PO NUMBER**, **PO AMOUNT** (both sortable) and **PO FILE**. **View PDF** opens the PO in a new browser tab, in the browser's own PDF viewer (read, print or save).
+- **Inside a project** (Summary of Expenses), the PO number, PO amount and **View PO (PDF)** are under the project name.
+- **Admins: Add PO / Edit PO** on a project's row (or inside the project) adds a PO to a project that has none (all three needed the first time) or changes the number, amount or file on their own. Logged as **Changed PO**.
+- **Projects without a PO** (made before this change, by a CSV import, or through the API with a new title) show "None" / "No file" until an admin adds it.
+- **Excel export:** the Summary sheet shows the PO number and PO amount; the Entries sheet starts with `project_title, po_number, po_amount, …` so it can be imported again.
+- **Opening the PDF:** a new tab can't send the sign-in, so the app asks for a link that works for **2 minutes**, only for that project's PO, only while the account is still allowed in (`POST /projects/{id}/po-file/link`). nginx serves the PDF with its own headers (`Frontend/nginx.conf`), because the app's strict Content-Security-Policy can stop the browser's PDF viewer. Upload limit in nginx raised to 12 MB.
+- **Deleting:** when a project is deleted permanently (purge, or Delete in Archived), its PDF goes with it; the Activity Log copy keeps the PO number and amount.
+
+### 4.23 PO and CV numbers: numbers only
+
+PO numbers and CV numbers are **digits only** (0-9), up to 30, leading zeros kept (`000123` stays `000123`), spaces around them trimmed. Checked everywhere a record is saved: adding and editing entries (admins), staff edit requests, creating projects, Add / Edit PO, and CSV import. The input boxes only accept digits and show a number keypad on phones. Messages: "CV no. must be numbers only (0-9)", "The PO number must be numbers only (0-9)".
+
+**Not yet:** CV numbers may still repeat across entries (only the CSV import refuses a CV already in the system or repeated in the file).
+
+### 4.24 Search and filters
+
+- **Filter by** picks **one** field at a time: **Project Title** (selected at first), **Payee / Particulars** or **PO Number**. The search looks only there, and the box's hint changes ("Search a project", "Search a payee", "Search a PO number"). Searching a CV number in Voucher Control isn't available; inside a project, the search finds entries by payee or CV no.
+- **Opening a project** (**View**) clears the search, so the text that found the project doesn't hide its entries.
+- The "nothing found" message names the field: "No project title matches …", "No project has a payee matching …", "No PO number matches …".
+- In the project page, dates, CV numbers and amounts stay on one line.
 
 ## 5. Database changes
 
@@ -669,12 +771,43 @@ All changes are applied automatically when the backend starts:
 | requested_at, reviewed_at | timestamptz | |
 | reviewed_by, review_note | varchar | |
 
+**`app_settings`** (November 16): one row per setting saved in Settings (4.21)
+
+| Column | Type | Notes |
+|---|---|---|
+| key | varchar(60) | primary key, e.g. `archive_retention_days`; also `logo_version` and `backup_request` (internal) |
+| value | varchar(500) | the saved value as text |
+| updated_by | varchar(255) | username |
+| updated_at | timestamptz | |
+
+**`app_assets`** (November 16): files set in Settings (the company logo)
+
+| Column | Type | Notes |
+|---|---|---|
+| key | varchar(60) | primary key (`logo`) |
+| content | bytea | the image |
+| content_type | varchar(30) | `image/png`, `image/jpeg`, `image/webp` |
+| updated_by, updated_at | | |
+
+**`project_po_files`** (November 16): each project's PO as a PDF
+
+| Column | Type | Notes |
+|---|---|---|
+| project_id | integer → projects | primary key; `CASCADE` (deleted with the project) |
+| content | bytea | the PDF |
+| filename | varchar(255) | as uploaded |
+| size | integer | bytes |
+| uploaded_by | varchar(255) | username |
+| uploaded_at | timestamptz | |
+
 ### New columns
 
 | Table | Column | Default | Purpose |
 |---|---|---|---|
+| projects | po_number | null | PO number, digits only; unique ignoring case (index `ux_projects_po_number` on `lower(po_number)`) — November 16 |
+| projects | po_amount | null | PO amount, `NUMERIC(14, 2)` — November 16 |
 | disbursements | is_archived | false | hidden from projects and totals |
-| disbursements | archived_by, archived_at | null | who archived it, and when (starts the 30-day clock) |
+| disbursements | archived_by, archived_at | null | who archived it, and when (starts the retention clock) |
 | disbursements | archived_with_project | false | restored together with its project |
 | projects | is_archived | false | hidden with all its entries |
 | projects | archived_by, archived_at | null | who archived it, and when |
@@ -711,19 +844,34 @@ All changes are applied automatically when the backend starts:
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| GET | `/projects` | user | Active projects, with `total_amount` and `entry_count` |
-| POST | `/projects` | user | Create a project |
+| GET | `/projects` | user | Active projects, with `total_amount`, `entry_count`, `po_number`, `po_amount`, `has_po_file` |
+| POST | `/projects` | user | Create a project. **Form** (multipart): `title`, `po_number` (digits), `amount`, `po_file` (PDF). 409 if the PO number is taken |
+| PUT | `/projects/{id}/po` | admin | Add or change the PO: any of `po_number`, `amount`, `po_file` (form) |
+| POST | `/projects/{id}/po-file/link` | user | `{url, expires_in}`: a 2-minute link to the PDF, for a new browser tab |
+| GET | `/projects/{id}/po-file` | user (or `?t=` link) | The PO as a PDF (inline) |
 | DELETE | `/projects/{id}` | admin | **Archive** the project and its entries |
 | GET | `/projects/archived` | admin | Archived projects with `deletes_at` |
 | POST | `/projects/{id}/restore` | admin | Restore with the entries archived alongside it |
-| GET | `/projects/{title}/summary` | user | Active entries and total (404 if archived) |
+| GET | `/projects/{title}/summary` | user | Active entries and total, plus `project_id`, `po_number`, `po_amount`, `has_po_file` (404 if archived) |
+
+### Settings
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/settings/public` | public | Company name, short name, currency, logo version, Create account / Forgot password on or off |
+| GET | `/settings` | user | `{values}`: the settings this user may see; admins also get `schema` (labels, limits, choices) and `backup_requested` |
+| PUT | `/settings` | admin | Change one or more: `{"key": value, …}`. 422 (nothing saved) if any value is wrong |
+| GET | `/settings/retention-preview?archive_retention_days=N` | admin | `{projects, entries}` a shorter period would delete |
+| POST | `/settings/backup-now` | admin | Ask the backup container for a backup within a minute |
+| GET | `/settings/logo` | public | The logo set in Settings (404: use the built-in one) |
+| PUT / DELETE | `/settings/logo` | admin | Upload (`file`, PNG/JPEG/WebP ≤ 1 MB) / go back to the built-in logo |
 
 ### Entries (disbursements)
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
 | GET | `/disbursements/` | user | Every active entry with its project title (the Voucher Control list, in one request) |
-| POST | `/disbursements/` | user | Add an entry |
+| POST | `/disbursements/` | user | Add an entry (`cv_no` digits only) |
 | PATCH | `/disbursements/{id}` | admin | Edit directly. Optional `original` (values seen) enables the conflict check |
 | DELETE | `/disbursements/{id}?reason=` | admin | **Archive** |
 | GET | `/disbursements/archived` | admin | Entries archived on their own, with `deletes_at` |
@@ -774,11 +922,14 @@ All changes are applied automatically when the backend starts:
 | `edit_requested` | Edit requested | A user asks to edit | disbursement |
 | `edit_approved` / `edit_rejected` | Edit approved / rejected | An admin decides | disbursement |
 | `import` | Imported file | An admin imports a CSV | disbursement |
-| `project_create` | Created project | A project is created (directly, or with its first entry) | project |
+| `project_create` | Created project | A project is created (directly with its PO, or with its first entry); the details include the PO number, amount and file name | project |
 | `project_archive` | Archived project | An admin archives a project | project |
 | `project_restore` | Restored project | An admin restores a project | project |
 | `project_delete` | Deleted project | Earlier empty-project deletes (no longer used) | project |
-| `purge` | Deleted permanently | The 30-day purge removes data (actor `system`) | project / disbursement |
+| `purge` | Deleted permanently | The automatic purge removes data after the retention period (actor `system`) | project / disbursement |
+| `project_po_update` | Changed PO | An admin adds or changes a project's PO | project |
+| `settings_update` | Changed settings | An admin saves settings, or changes the logo (old → new values) | settings |
+| `backup_requested` | — | An admin clicks **Back up now** | backup |
 | `register` | Registered | An account is created | user |
 | `login` / `login_failed` | Signed in / Failed sign-in | Sign-in attempts | user |
 | `password_change` | Changed password | Own password changed, or a temporary one replaced | user |
@@ -817,6 +968,14 @@ All changes are applied automatically when the backend starts:
 | `schemas.py` | changed | Entries: amount above 0, at most 99,999,999.99, up to 2 decimals; payee, CV number and project title cannot be blank (spaces trimmed) |
 | `models.py` | changed | Project totals added up exactly (Decimal instead of float) |
 | `tests/` | **new** | Automated tests (pytest); `requirements-dev.txt` and `pytest.ini` set them up |
+| `app_settings.py` | **new (Nov 16)** | All Settings: types, limits, defaults (from `.env`), who may read them; cached reading (`get`), checking (`validate`), currency helpers |
+| `settings.py` | **new (Nov 16)** | `/settings` routes: read, save, retention preview, Back up now, logo |
+| `purchase_orders.py` | **new (Nov 16)** | Creating projects with their PO; Add / Edit PO; the PDF and its 2-minute link |
+| `activity.py`, `auth.py`, `security.py`, `sessions.py`, `password_resets.py`, `deletion_requests.py`, `chatbot.py` | changed (Nov 16) | Read their limits from Settings (retention, lockout, idle minutes, one device, sign-up and reset on/off, staff-edit rules, assistant access, company name, currency); Activity Log clean-up; `PURGE_ENABLED` |
+| `imports.py` | changed (Nov 16) | CSV `po_number` / `po_amount` columns and PO checks; numbers-only PO/CV; export with PO columns |
+| `models.py`, `database.py`, `schemas.py`, `crud.py` | changed (Nov 16) | `AppSetting`, `AppAsset`, `ProjectPoFile`; `projects.po_number` / `po_amount` and the unique index; numbers-only CV in entries; PO fields in project lists and summaries |
+| `backup/backup.sh` | changed (Nov 16) | Reads the schedule from Settings; handles **Back up now**; checks every minute |
+| `tests/test_settings.py`, `tests/test_purchase_orders.py` | **new (Nov 16)** | Settings and PO tests; other test files updated for numbers-only CV/PO and project creation with a PDF |
 
 ### Project root
 
@@ -828,6 +987,8 @@ All changes are applied automatically when the backend starts:
 | `loadtest/locustfile.py` | **new** | Load test: simulated staff, admins and assistant users |
 | `.gitignore` | changed | Ignores `.deploy/` |
 | `test.ps1` | **new** | Runs the automated backend tests in Docker with a throwaway database (section 10) |
+| `sample_data/*.csv` | changed (Nov 16) | New import format with `po_number`, `po_amount`; numbers-only PO and CV numbers; more error cases |
+| `sample_data/PO_20250001_sample.pdf` | **new (Nov 16)** | Sample PO for the first sample project |
 
 ### Frontend (`Project/Frontend/src`, plus the build files in `Project/Frontend`)
 
@@ -857,6 +1018,16 @@ All changes are applied automatically when the backend starts:
 | `version.js` | **new** | The version stamp and its label |
 | `components/UpdateBanner.jsx` | **new** | "A new version of the app is available" bar |
 | `App.jsx`, `components/Login.jsx`, `components/AdminMenu.jsx` | changed | Show the update bar and the version |
+| `components/SettingsPage.jsx` | **new (Nov 16)** | Settings page: tabs, fields built from the server's list, retention warning, Back up now, logo |
+| `hooks/useAppSettings.js`, `hooks/useRetentionDays.js` | **new (Nov 16)** | The settings shared by every screen (loaded before sign-in for the public ones, reloaded on live updates) |
+| `components/Logo.jsx` | **new (Nov 16)** | The logo from Settings, or the built-in one |
+| `components/ProjectDialog.jsx` | changed (Nov 16) | New project with PO number, PO amount and PDF; Add / Edit PO for admins |
+| `utils/openPoFile.js` | **new (Nov 16)** | Opens a PO PDF in a new tab |
+| `components/ProjectsTable.jsx`, `components/SummaryOfExpenses.jsx` | changed (Nov 16) | PO columns and buttons; one-field search; messages; no wrapping of dates, CV numbers and amounts |
+| `components/Dashboard.jsx`, `components/AdminMenu.jsx`, `components/UserPanel.jsx` | changed (Nov 16) | Settings page and menu item (with the waiting-accounts badge); Manage Users and backup status moved out of the User Panel; PO Number filter; search cleared when opening a project; assistant hidden when turned off |
+| `components/EntryDialog.jsx`, `components/Login.jsx`, `App.jsx`, `utils/format.js` | changed (Nov 16) | Numbers-only CV; staff edits without approval and required reasons; Create account / Forgot password hidden when off; idle message and currency from Settings |
+| `components/ImportDialog.jsx`, `help/guides.js`, `api/api.js`, `api/mockAPI.js` | changed (Nov 16) | New import template and text; guides for Settings and POs; new API calls |
+| `Frontend/nginx.conf` | changed (Nov 16) | Upload limit 12 MB; own headers for the PO PDF |
 
 ---
 
@@ -864,7 +1035,9 @@ All changes are applied automatically when the backend starts:
 
 | Setting | File | Default | Notes |
 |---|---|---|---|
-| `RETENTION_DAYS` | `Backend/activity.py` | 30 | Days before archived items are deleted permanently. Set to `0` temporarily to test the purge |
+| **Settings page** | in the app (admins) | — | Archive retention, sign-in lockout, idle sign-out, one device per account, sign-up and password-reset switches and limits, staff-edit approval, Activity Log clean-up, assistant access, backup schedule, company name, logo and currency. See 4.21. The matching `.env` values (`LOGIN_MAX_FAILURES`, `LOGIN_LOCK_MINUTES`, `SESSION_IDLE_MINUTES`, `SINGLE_SESSION`, `SINGLE_SESSION_EXEMPT`, `REGISTER_*`, `MAX_WAITING_ACCOUNTS`, `BACKUP_HOUR`, `BACKUP_KEEP_*`) are only starting values |
+| `PURGE_ENABLED` | `Backend\.env` (laptop only) | true | `false` stops the automatic deletion and Activity Log clean-up on a backend pointed at the real database while testing |
+| PO file size | `Backend/purchase_orders.py` (`MAX_PO_FILE_BYTES`), `Frontend/nginx.conf` (`client_max_body_size`) | 10 MB, 12m | Keep nginx a little above the PDF limit |
 | `PURGE_EVERY_SECONDS` | `Backend/auth.py` | 3600 | How often the purge runs |
 | `LIVE_CHECK_SECONDS` | `Backend/live.py` | 1.5 | How often the backend looks for new changes to push |
 | `OLLAMA_MODEL` | `Backend/docker-compose.yml` (api) | `qwen3:4b-instruct-2507-q4_K_M` | Which model the assistant uses |
@@ -880,7 +1053,7 @@ All changes are applied automatically when the backend starts:
 | `max_connections` | `Backend/docker-compose.yml` (db `command`) | 200 | PostgreSQL's connection limit |
 | Auto-deploy interval | `install-autodeploy.ps1 -Minutes` | 5 | How often `main` is checked |
 | Update check | `Frontend/src/components/UpdateBanner.jsx` (`CHECK_EVERY_MS`) | 1 minute | How often open screens check for a new version |
-| Token lifetime | `Backend/auth.py` (`/token` route) | 30 minutes | Users are signed out after this |
+| Token lifetime | Settings → Security (sign out after inactivity) | 30 minutes | Users are signed out after this long without activity |
 | Temporary password length | `Backend/password_resets.py` (`make_temporary_password`) | 10 | |
 | Activity page size | `Frontend/src/components/ActivityLog.jsx` (`PAGE`) | 50 | |
 
@@ -903,6 +1076,8 @@ All changes are applied automatically when the backend starts:
 - The assistant tests replace the language model with a stand-in: they check the rules around it (which lookups each role gets, refusing attempts to get around the rules, hiding leaked instructions), not the quality of its answers.
 - Without Docker (a Python venv and any Postgres): `pip install -r Backend/requirements-dev.txt`, set `TEST_DATABASE_URL=postgresql+psycopg://postgres:<password>@localhost:5432/caic_db_test`, then run `python -m pytest -q` in `Backend`.
 - When you add a feature, add a test next to the similar ones (each file covers one area; `conftest.py` has helpers such as `add_entry` and the `admin` / `staff` fixtures that are already signed in).
+
+November 16 additions: `tests/test_settings.py` (saving and validating settings, who may read them, and that each one takes effect: lockout, idle minutes, one device, sign-up and reset switches, staff-edit rules, assistant access, Activity Log clean-up, Back up now, logo, currency) and `tests/test_purchase_orders.py` (required PO fields, PDF only, unique PO numbers, the 2-minute link, Add / Edit PO, permanent delete removes the PDF), plus import tests for the PO columns and numbers-only rules. The other test files now create projects with a PDF and use numbers-only CV and PO values.
 
 What the tests caught when they were written (fixed): project totals were added up with rounding errors (0.10 + 0.20 showed as 0.30000000000000004); the API accepted zero or negative amounts, amounts with more than 2 decimals, and blank payees, CV numbers or project titles; and an amount over 99,999,999.99 crashed the request (500) instead of being refused.
 
@@ -1035,6 +1210,13 @@ Re-run with 500 users, and ask the assistant something during the run, to compar
 ## 11. Known issues and follow-ups
 
 These were found during the work but are not fixed yet:
+
+0. **November 16 follow-ups:**
+   - **CV numbers can repeat** across entries (postponed on purpose); only the CSV import refuses duplicates.
+   - **Projects can exist without a PO:** older projects, projects created by a CSV import (no PDF in a CSV), and a project created through the API by adding an entry with a new title (the app's screens don't do this). Admins fill them in with **Add PO / Edit PO**.
+   - **Restoring a backup** is still done on the server with `restore.ps1`; it isn't in the app.
+   - **`main` on GitHub is behind:** `feature/activity-log-archiving` and `feature/settings-and-purchase-orders` haven't been merged, so `.\deploy.ps1` without `-Branch` (and automatic deploys) would deploy an old version. Merge the pull request before relying on them.
+   - **Demo mode** (`VITE_DEMO=true`) has no Settings page and keeps only the title when creating a project.
 
 1. **Demo mode is incomplete.** A teammate fixed `src/api/mockAPI.js` (commit `96f9182`), but it doesn't include the newer features (requests, Activity Log, users, import), so those screens won't work with `VITE_DEMO=true`. Live updates are switched off in demo mode.
 2. **Lint warnings that predate this update:** `Dashboard.jsx` (setState inside an effect, two places), `AdminMenu.jsx` (unused `initial` prop) and `App.jsx` (re-thrown error without `cause`). The app runs normally.
