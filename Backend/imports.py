@@ -1,21 +1,29 @@
 """CSV import of disbursements (admins only).
 
-Columns: project_title, date, cv_no, payee, amount  (header row required, any order).
+Columns: project_title, po_number, po_amount, date, cv_no, payee, amount
+(header row required, any order).
 - preview: checks every row and reports problems; nothing is saved.
 - commit:  saves all valid rows in one transaction; invalid rows are skipped.
-New project titles are created automatically. One Activity Log entry records the import.
+
+Purchase orders: every row names its project's PO (po_number, po_amount). The rows of one
+project must agree; a new project needs both; a PO number can belong to only one project.
+New projects are created with their PO. A CSV can't carry the PO file (PDF): an admin adds it
+afterwards with Add PO / Edit PO. One Activity Log entry records the import.
 """
 import csv
 import io
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import activity
+import app_settings
 import crud
 import database
 import models
@@ -25,7 +33,10 @@ router = APIRouter(tags=["Import"])
 
 MANILA = timezone(timedelta(hours=8))
 
-REQUIRED = ["project_title", "date", "cv_no", "payee", "amount"]
+REQUIRED = ["project_title", "po_number", "po_amount", "date", "cv_no", "payee", "amount"]
+PO_NUMBER_RULE = re.compile(r"^\d{1,30}$")  # numbers only, as purchase_orders.py
+CV_RULE = re.compile(r"^\d{1,30}$")         # numbers only, as schemas.check_cv_no
+MAX_PO_AMOUNT = Decimal("999999999999.99")                           # projects.po_amount NUMERIC(14, 2)
 MAX_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 10000
 MAX_AMOUNT = Decimal("99999999.99")  # disbursements.amount is NUMERIC(10, 2)
@@ -37,6 +48,12 @@ class RowError(BaseModel):
     message: str
 
 
+class NewProject(BaseModel):
+    title: str
+    po_number: str
+    po_amount: Decimal
+
+
 class ImportReport(BaseModel):
     mode: str
     file_name: str
@@ -45,7 +62,9 @@ class ImportReport(BaseModel):
     error_rows: int
     errors: List[RowError]
     new_projects: List[str]
+    new_project_details: List[NewProject] = []
     existing_projects: int
+    pos_added: int = 0          # existing projects without a PO that get one from the file
     total_amount: Decimal
     first_date: Optional[date]
     last_date: Optional[date]
@@ -70,18 +89,20 @@ def _parse_date(text: str) -> date:
     raise ValueError(f"date '{text}' isn't a valid date (use YYYY-MM-DD)")
 
 
-def _parse_amount(text: str) -> Decimal:
-    cleaned = text.replace("₱", "").replace("PHP", "").replace(",", "").replace(" ", "")
+def _parse_amount(text: str, label: str = "amount", maximum: Decimal = MAX_AMOUNT) -> Decimal:
+    cleaned = text.replace("₱", "").replace("PHP", "").replace(app_settings.get("currency"), "")
+    cleaned = cleaned.replace("$", "").replace("€", "").replace("¥", "").replace("£", "")
+    cleaned = cleaned.replace(",", "").replace(" ", "")
     try:
         value = Decimal(cleaned)
     except InvalidOperation:
-        raise ValueError(f"amount '{text}' isn't a number")
-    if value <= 0:
-        raise ValueError("amount must be greater than zero")
-    if value > MAX_AMOUNT:
-        raise ValueError("amount is too large (max 99,999,999.99)")
+        raise ValueError(f"{label} '{text}' isn't a number")
+    if not value.is_finite() or value <= 0:
+        raise ValueError(f"{label} must be greater than zero")
+    if value > maximum:
+        raise ValueError(f"{label} is too large (max {maximum:,})")
     if value != value.quantize(Decimal("0.01")):
-        raise ValueError(f"amount '{text}' has more than 2 decimal places")
+        raise ValueError(f"{label} '{text}' has more than 2 decimal places")
     return value.quantize(Decimal("0.01"))
 
 
@@ -142,6 +163,21 @@ async def import_disbursements(
         except ValueError as e:
             problems.append(str(e))
 
+        # The project's PO, as written on this row (may be blank: see the project checks below)
+        po_number = values["po_number"]
+        if po_number and not PO_NUMBER_RULE.match(po_number):
+            problems.append(f"po_number '{po_number}' must be numbers only (0-9)")
+            po_number = ""
+        po_amount = None
+        if values["po_amount"]:
+            try:
+                po_amount = _parse_amount(values["po_amount"], "po_amount", MAX_PO_AMOUNT)
+            except ValueError as e:
+                problems.append(str(e))
+
+        if values["cv_no"] and not CV_RULE.match(values["cv_no"]):
+            problems.append(f"cv_no '{values['cv_no']}' must be numbers only (0-9)")
+
         cv_key = values["cv_no"].lower()
         if cv_key:
             if cv_key in existing_cvs:
@@ -158,7 +194,73 @@ async def import_disbursements(
         if problems:
             errors.append({"line": line, "message": "; ".join(problems)})
         else:
-            valid.append({**values, "date": parsed_date, "amount": parsed_amount, "line": line})
+            valid.append({**values, "date": parsed_date, "amount": parsed_amount, "line": line,
+                          "po_number": po_number, "po_amount": po_amount})
+
+    # ---- Each project's PO: the rows must agree, new projects need one, PO numbers are unique
+    po_owner = {p.po_number.lower(): p for p in projects.values() if p.po_number}
+    by_project = {}
+    for r in valid:
+        by_project.setdefault(r["project_title"].lower(), []).append(r)
+
+    plan = {}          # project key -> (po_number, po_amount) to save; None = leave as it is
+    taken = {}         # po number (lower) -> project key, within this file
+    bad = {}           # project key -> why all its rows are skipped
+    for key, rows in by_project.items():
+        title = rows[0]["project_title"]
+        numbers = {r["po_number"].lower(): r["po_number"] for r in rows if r["po_number"]}
+        amounts = {r["po_amount"] for r in rows if r["po_amount"] is not None}
+        if len(numbers) > 1:
+            bad[key] = f"the rows of project '{title}' have different po_number values ({', '.join(numbers.values())})"
+            continue
+        if len(amounts) > 1:
+            bad[key] = (f"the rows of project '{title}' have different po_amount values "
+                        f"({', '.join(f'{a:,.2f}' for a in sorted(amounts))})")
+            continue
+        number = next(iter(numbers.values()), "")
+        amount = next(iter(amounts), None)
+        existing = projects.get(key)
+
+        if existing and existing.po_number:
+            # Already has a PO: the file may leave it blank, or repeat the same one
+            if number and number.lower() != existing.po_number.lower():
+                bad[key] = f"project '{existing.title}' already has PO {existing.po_number}, not {number}"
+            elif amount is not None and existing.po_amount is not None and amount != existing.po_amount:
+                bad[key] = (f"project '{existing.title}' already has a PO amount of {existing.po_amount:,.2f}, "
+                            f"not {amount:,.2f}")
+            continue
+        if not number or amount is None:
+            if existing:
+                if number or amount is not None:
+                    bad[key] = f"give both po_number and po_amount for project '{existing.title}' (or neither)"
+                continue  # older project without a PO, and the file doesn't give one: fine
+            missing = " and ".join(c for c, v in (("po_number", number), ("po_amount", amount)) if not v)
+            bad[key] = f"project '{title}' is new: its {missing} {'is' if ' and ' not in missing else 'are'} needed"
+            continue
+        owner = po_owner.get(number.lower())
+        if owner is not None and owner.title.lower() != key:
+            bad[key] = f"PO {number} already belongs to project '{owner.title}'" + (" (archived)" if owner.is_archived else "")
+            continue
+        if number.lower() in taken:
+            other = by_project[taken[number.lower()]][0]["project_title"]
+            bad[key] = f"PO {number} is also given for project '{other}' in this file"
+            other_key = taken[number.lower()]
+            bad.setdefault(other_key, f"PO {number} is also given for project '{title}' in this file")
+            plan.pop(other_key, None)
+            continue
+        taken[number.lower()] = key
+        plan[key] = (number, amount)
+
+    if bad:
+        kept = []
+        for r in valid:
+            why = bad.get(r["project_title"].lower())
+            if why:
+                errors.append({"line": r["line"], "message": why})
+            else:
+                kept.append(r)
+        valid = kept
+        errors.sort(key=lambda e: e["line"])
 
     new_titles = []
     seen_new = set()
@@ -168,6 +270,9 @@ async def import_disbursements(
             seen_new.add(key)
             new_titles.append(r["project_title"])
     existing_used = len({r["project_title"].lower() for r in valid} - seen_new)
+    new_details = [{"title": t, "po_number": plan[t.lower()][0], "po_amount": plan[t.lower()][1]}
+                   for t in new_titles]
+    po_added = [k for k in plan if k in projects and k in {r["project_title"].lower() for r in valid}]
 
     report = {
         "mode": mode,
@@ -177,7 +282,9 @@ async def import_disbursements(
         "error_rows": len(errors),
         "errors": errors[:200],
         "new_projects": new_titles,
+        "new_project_details": new_details,
         "existing_projects": existing_used,
+        "pos_added": len(po_added),
         "total_amount": sum((r["amount"] for r in valid), Decimal("0")),
         "first_date": min((r["date"] for r in valid), default=None),
         "last_date": max((r["date"] for r in valid), default=None),
@@ -189,10 +296,18 @@ async def import_disbursements(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "There are no valid rows to import.")
 
     for title in new_titles:
-        p = models.Project(title=title)
+        number, amount = plan[title.lower()]
+        p = models.Project(title=title, po_number=number, po_amount=amount)
         db.add(p)
         projects[title.lower()] = p
-    db.flush()
+    for key in po_added:  # older projects without a PO: the file gives it
+        projects[key].po_number, projects[key].po_amount = plan[key]
+    try:
+        db.flush()
+    except IntegrityError:  # someone saved the same PO number while this was importing
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "A PO number in this file was just used by another project. Check the file again.")
 
     for r in valid:
         db.add(models.Disbursement(
@@ -207,12 +322,15 @@ async def import_disbursements(
 
     activity.log(
         db, current_user.username, "import",
-        f"Imported {len(valid)} entr{'y' if len(valid) == 1 else 'ies'} (PHP {report['total_amount']:,.2f}) "
+        f"Imported {len(valid)} entr{'y' if len(valid) == 1 else 'ies'} ({app_settings.money(report['total_amount'])}) "
         f"from '{report['file_name']}'" + (f", creating {len(new_titles)} project(s)" if new_titles else "")
+        + (f"; added the PO of {len(po_added)} existing project(s)" if po_added else "")
         + (f"; skipped {len(errors)} invalid row(s)" if errors else ""),
         "disbursement", None,
         {"file": report["file_name"], "imported": len(valid), "skipped": len(errors),
          "total": activity.plain(report["total_amount"]), "new_projects": new_titles,
+         "new_project_pos": {d["title"]: d["po_number"] for d in new_details},
+         "pos_added": [projects[k].title for k in po_added],
          "first_date": activity.plain(report["first_date"]), "last_date": activity.plain(report["last_date"]),
          "skipped_lines": [e["line"] for e in errors][:500]},
     )
@@ -230,6 +348,8 @@ async def import_disbursements(
 EXPORT_COLUMNS = [
     # header,        width, number format
     ("project_title", None, None),
+    ("po_number",     None, None),
+    ("po_amount",     16,   "#,##0.00"),
     ("date",          12,   "yyyy-mm-dd"),
     ("cv_no",         None, None),
     ("payee",         None, None),
@@ -263,7 +383,7 @@ def _text(cell, value) -> None:
     cell.data_type = "s"
 
 
-def build_workbook(title: str, entries: list, exported_by: str) -> bytes:
+def build_workbook(title: str, entries: list, exported_by: str, po_number=None, po_amount=None) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -277,7 +397,7 @@ def build_workbook(title: str, entries: list, exported_by: str) -> bytes:
 
     for row_no, e in enumerate(entries, start=2):
         values = [
-            title, e.date, e.cv_no, e.payee, e.amount,
+            title, po_number or "", po_amount, e.date, e.cv_no, e.payee, e.amount,
             getattr(e, "created_by_name", None) or e.created_by, _local_time(e.created_at),
             getattr(e, "updated_by_name", None) or e.updated_by, _local_time(e.updated_at),
         ]
@@ -312,9 +432,13 @@ def build_workbook(title: str, entries: list, exported_by: str) -> bytes:
     summary = wb.create_sheet("Summary")
     total = sum((e.amount for e in entries), Decimal("0"))
     rows = [
+        ("Company", app_settings.get("company_name"), None),
         ("Project", title, None),
+        ("PO number", po_number or "(none)", None),
+        (f"PO amount ({app_settings.get('currency')})", po_amount if po_amount is not None else "(none)",
+         "#,##0.00" if po_amount is not None else None),
         ("Entries", len(entries), "#,##0"),
-        ("Total amount (PHP)", total, "#,##0.00"),
+        (f"Total amount ({app_settings.get('currency')})", total, "#,##0.00"),
         ("First entry", min((e.date for e in entries), default=None), "yyyy-mm-dd"),
         ("Last entry", max((e.date for e in entries), default=None), "yyyy-mm-dd"),
         ("Exported by", exported_by, None),
@@ -349,7 +473,8 @@ def export_project(
     if not summary:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     entries = sorted(summary["entries"], key=lambda e: (e.date, e.id))
-    content = build_workbook(summary["project_title"], entries, current_user.name)
+    content = build_workbook(summary["project_title"], entries, current_user.name,
+                             summary.get("po_number"), summary.get("po_amount"))
 
     project = db.query(models.Project).filter(models.Project.title == summary["project_title"]).first()
     activity.log(db, current_user.username, "export",

@@ -11,12 +11,21 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, unique=True, index=True, nullable=False)
 
-    # Archived projects (and their entries) are hidden, and deleted for good after 30 days
+    # Archived projects (and their entries) are hidden, and deleted for good after the
+    # retention period admins set in Settings (30 days by default)
     is_archived = Column(Boolean, default=False, server_default=text("false"), nullable=False, index=True)
     archived_by = Column(String, nullable=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Purchase order. Required for new projects; older projects may have none until an admin
+    # adds it. The PO number is unique ignoring capitals (index ux_projects_po_number, made by
+    # database.ensure_schema). The PDF is in project_po_files.
+    po_number = Column(String(60), nullable=True)
+    po_amount = Column(Numeric(14, 2), nullable=True)
+
     disbursements = relationship("Disbursement", back_populates="project")
+    po_file = relationship("ProjectPoFile", uselist=False, back_populates="project",
+                           cascade="all, delete-orphan", lazy="select")
 
     @property
     def active_disbursements(self) -> list:
@@ -58,7 +67,8 @@ class Disbursement(Base):
         nullable=False,
     )
 
-    # Archiving hides an entry. It can be restored for 30 days, then it is deleted for good.
+    # Archiving hides an entry. It can be restored for the retention period admins set in
+    # Settings (30 days by default), then it is deleted for good.
     is_archived = Column(Boolean, default=False, server_default=text("false"), nullable=False, index=True)
     archived_by = Column(String, nullable=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)
@@ -243,3 +253,45 @@ class PasswordResetRequest(Base):
     review_note = Column(String(500), nullable=True)
 
     user = relationship("User")
+
+
+class AppSetting(Base):
+    """App-wide settings admins can change (User menu → Settings), one row per setting."""
+    __tablename__ = "app_settings"
+
+    key = Column(String(60), primary_key=True)
+    value = Column(String(500), nullable=False)
+    updated_by = Column(String(255), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class AppAsset(Base):
+    """Files set in Settings (for now the company logo), kept in the database so every
+    backend process and backup has them."""
+    __tablename__ = "app_assets"
+
+    key = Column(String(60), primary_key=True)
+    content = Column(LargeBinary, nullable=False)
+    content_type = Column(String(30), nullable=False)
+    updated_by = Column(String(255), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class ProjectPoFile(Base):
+    """The PDF copy of a project's purchase order, kept apart from projects so the file isn't
+    loaded every time a project is read."""
+    __tablename__ = "project_po_files"
+
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    content = Column(LargeBinary, nullable=False)
+    filename = Column(String(255), nullable=False)
+    size = Column(Integer, nullable=False)
+    uploaded_by = Column(String(255), nullable=False)
+    uploaded_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    project = relationship("Project", back_populates="po_file")

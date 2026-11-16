@@ -84,11 +84,11 @@ def test_admin_cannot_review_own_request(client, admin, admin2, staff):
 
 
 def test_staff_sees_only_own_requests(client, staff, staff2):
-    a = add_entry(client, staff, cv_no="CV-1")
-    b = add_entry(client, staff, cv_no="CV-2")
+    a = add_entry(client, staff, cv_no="100001")
+    b = add_entry(client, staff, cv_no="100002")
     ask_archive(client, staff, a["id"])
     ask_archive(client, staff2, b["id"])
-    assert [r["cv_no"] for r in client.get("/my-requests", headers=staff.auth).json()] == ["CV-1"]
+    assert [r["cv_no"] for r in client.get("/my-requests", headers=staff.auth).json()] == ["100001"]
 
 
 def test_cannot_request_on_archived_or_missing_entry(client, admin, staff):
@@ -160,12 +160,12 @@ def test_archiving_entry_auto_rejects_its_pending_request(client, db, admin, sta
 
 
 def test_pending_list_filters_by_status(client, admin, staff):
-    a = add_entry(client, staff, cv_no="CV-1")
-    b = add_entry(client, staff, cv_no="CV-2")
+    a = add_entry(client, staff, cv_no="100001")
+    b = add_entry(client, staff, cv_no="100002")
     r1 = ask_archive(client, staff, a["id"]).json()["id"]
     ask_archive(client, staff, b["id"])
     client.post(f"/deletion-requests/{r1}/approve", headers=admin.auth)
     assert len(pending(client, admin)) == 1
     approved = client.get("/deletion-requests?status=approved", headers=admin.auth).json()
-    assert [r["cv_no"] for r in approved] == ["CV-1"]
+    assert [r["cv_no"] for r in approved] == ["100001"]
     assert client.get("/deletion-requests?status=bogus", headers=admin.auth).status_code == 422

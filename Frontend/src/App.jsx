@@ -6,8 +6,10 @@ import Dashboard from "./components/Dashboard";
 import ForcePasswordChange from "./components/ForcePasswordChange";
 import UpdateBanner from "./components/UpdateBanner";
 import { useSessionKeepAlive } from "./hooks/useSessionKeepAlive";
+import { getAppSettings, setAppSettings } from "./hooks/useAppSettings";
 
-const IDLE_SIGN_OUT = "You were signed out after 30 minutes without activity. Sign in again to continue.";
+const idleSignOut = () =>
+  `You were signed out after ${getAppSettings().session_idle_minutes} minutes without activity. Sign in again to continue.`;
 
 export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem("token") || (DEMO ? "demo" : null));
@@ -33,6 +35,12 @@ export default function App() {
 
   const api = useMemo(() => createApi(() => tokenRef.current, logout), [signedIn, logout]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Company name, logo, currency and whether Create account / Forgot password are on: needed
+  // before anyone signs in (Settings → Company / Security)
+  useEffect(() => {
+    createApi(null, null).getPublicSettings?.().then(setAppSettings, () => {});
+  }, []);
+
   useEffect(() => {
     if (!signedIn) return;
     let live = true;
@@ -51,7 +59,7 @@ export default function App() {
     tokenRef.current = fresh;
     setToken(fresh);
   }, []);
-  const expired = useCallback(() => logout(IDLE_SIGN_OUT), [logout]);
+  const expired = useCallback(() => logout(idleSignOut()), [logout]);
   const { warning: idleWarning, stay } = useSessionKeepAlive({
     token,
     api,

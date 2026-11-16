@@ -410,7 +410,7 @@ Deactivating is usually better than deleting: if a deleted username is registere
 
 **Import File** in Voucher Control (admins only; greyed out for normal users).
 
-1. Choose a CSV with the columns `project_title, date, cv_no, payee, amount` (header row required, any order). A **Download a template** link is in the window.
+1. Choose a CSV with the columns `project_title, po_number, po_amount, date, cv_no, payee, amount` (header row required, any order). `po_number` and `cv_no` are numbers only (0-9; leading zeros are kept). Every row of a project names the same purchase order (it may be left blank on all but one row of that project); a new project needs its PO number and PO amount; a PO number belongs to only one project. New projects are created with their PO; attach each PO file (PDF) afterwards with **Edit PO**. A **Download a template** link is in the window.
 2. The backend checks every row **without saving** and shows: rows found, rows ready, rows with problems, total amount, new projects (expandable), the date range, and a table of skipped rows with line numbers and reasons.
 3. **Import N rows** saves all valid rows in one transaction and creates any new projects. One **Imported file** entry is written to the Activity Log (file name, counts, total, new projects, skipped line numbers).
 
@@ -506,7 +506,7 @@ The script works in `.deploy\live` and `.deploy\preview` (git worktrees, ignored
 
 **Export Excel** in a project's *Summary of Expenses* downloads all of that project's active entries (not only what the search shows), oldest first, as `<Project-Name>_<date>.xlsx` (`GET /projects/{title}/export`, built with `openpyxl`).
 
-- **Sheet "Entries":** `project_title, date, cv_no, payee, amount, created_by, created_at, updated_by, updated_at`. Header in bold on the app's yellow, frozen while scrolling; columns sized to fit; dates as real dates (`yyyy-mm-dd`), amounts as numbers (`#,##0.00`), times in Philippine time; filter buttons and banded rows (an Excel table). Prints landscape, one page wide, with the header on every page.
+- **Sheet "Entries":** `project_title, po_number, po_amount, date, cv_no, payee, amount, created_by, created_at, updated_by, updated_at`. Header in bold on the app's yellow, frozen while scrolling; columns sized to fit; dates as real dates (`yyyy-mm-dd`), amounts as numbers (`#,##0.00`), times in Philippine time; filter buttons and banded rows (an Excel table). Prints landscape, one page wide, with the header on every page.
 - **Sheet "Summary":** project, number of entries, total amount, first and last entry date, who exported it and when.
 - **Importing it back:** the import takes CSV. In Excel, open the *Entries* sheet and use *Save As > CSV UTF-8*; the first five columns are the import format and the rest are ignored.
 - **Safe:** text is always stored as text, so a payee like `=HYPERLINK(...)` is shown as written, never run as a formula.

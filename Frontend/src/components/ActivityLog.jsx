@@ -1,3 +1,4 @@
+import { daysLabel, useRetentionDays } from "../hooks/useRetentionDays";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtDate, fmtStamp, money } from "../utils/format";
 import DeletionRequests from "./DeletionRequests";
@@ -33,9 +34,11 @@ const ACTIONS = [
   ["backup_failed", "Backup FAILED"],
   ["restore", "Database restored"],
   ["project_create", "Created project"],
+  ["project_po_update", "Changed PO"],
   ["project_archive", "Archived project"],
   ["project_restore", "Restored project"],
   ["purge", "Deleted permanently"],
+  ["settings_update", "Changed settings"],
   ["permanent_delete", "Deleted permanently (by admin)"],
   ["project_delete", "Deleted project"],
   ["register", "Registered"],
@@ -206,6 +209,7 @@ function TimeLeft({ item }) {
 }
 
 function ArchivedTab({ api, version, onChanged }) {
+  const keepFor = daysLabel(useRetentionDays());
   const [projects, setProjects] = useState(null);
   const [entries, setEntries] = useState(null);
   const [error, setError] = useState("");
@@ -273,7 +277,7 @@ function ArchivedTab({ api, version, onChanged }) {
   return (
     <>
       <p className="muted small archive-note">
-        Archived items can be restored for 30 days, then they're deleted permanently. You can also delete them
+        Archived items can be restored for {keepFor}, then they're deleted permanently. Admins can change this in Settings → System. You can also delete them
         permanently now. Either way, a copy stays in the Activity tab's record of the deletion.
       </p>
       {error && <p className="error">{error}</p>}
@@ -407,8 +411,8 @@ function ArchivedTab({ api, version, onChanged }) {
           <p>
             <strong>This can't be undone.</strong>{" "}
             {kind === "projects"
-              ? `The ${plural(toErase.length, "project")} and all ${plural(erasingEntries, "entry")} in them will be erased now instead of after 30 days.`
-              : `The ${plural(toErase.length, "entry")} will be erased now instead of after 30 days.`}{" "}
+              ? `The ${plural(toErase.length, "project")} and all ${plural(erasingEntries, "entry")} in them will be erased now instead of after ${keepFor}.`
+              : `The ${plural(toErase.length, "entry")} will be erased now instead of after ${keepFor}.`}{" "}
             A copy of what's deleted stays in the Activity Log.
           </p>
           <ul className="bulk-list">

@@ -3,11 +3,11 @@ from decimal import Decimal
 
 import pytest
 
-from tests.conftest import add_entry, logs
+from tests.conftest import add_entry, logs, new_project
 
 
 def entry_payload(**overrides):
-    body = {"project_title": "Bamban Plant", "cv_no": "CV-001", "payee": "Acme Supply",
+    body = {"project_title": "Bamban Plant", "cv_no": "000001", "payee": "Acme Supply",
             "date": "2026-10-01", "amount": "1500.00"}
     body.update(overrides)
     return body
@@ -16,7 +16,7 @@ def entry_payload(**overrides):
 # ---------- Projects ----------
 
 def test_create_project_and_list_it(client, staff):
-    r = client.post("/projects", headers=staff.auth, json={"title": "Calamba Warehouse"})
+    r = new_project(client, staff, "Calamba Warehouse")
     assert r.status_code == 201
     listed = client.get("/projects", headers=staff.auth).json()
     assert [(p["title"], Decimal(p["total_amount"]), p["entry_count"]) for p in listed] == \
@@ -24,18 +24,18 @@ def test_create_project_and_list_it(client, staff):
 
 
 def test_duplicate_project_title_is_refused(client, staff):
-    client.post("/projects", headers=staff.auth, json={"title": "Calamba Warehouse"})
-    assert client.post("/projects", headers=staff.auth, json={"title": "Calamba Warehouse"}).status_code == 400
+    new_project(client, staff, "Calamba Warehouse")
+    assert new_project(client, staff, "Calamba Warehouse").status_code == 400
 
 
 def test_empty_project_title_is_refused(client, staff):
-    assert client.post("/projects", headers=staff.auth, json={"title": ""}).status_code == 422
+    assert new_project(client, staff, "").status_code == 422
 
 
 def test_project_totals_add_up(client, staff):
-    add_entry(client, staff, cv_no="CV-1", amount="1000.10")
-    add_entry(client, staff, cv_no="CV-2", amount="250.25")
-    add_entry(client, staff, project="Other", cv_no="CV-3", amount="5.00")
+    add_entry(client, staff, cv_no="100001", amount="1000.10")
+    add_entry(client, staff, cv_no="100002", amount="250.25")
+    add_entry(client, staff, project="Other", cv_no="100003", amount="5.00")
     totals = {p["title"]: Decimal(p["total_amount"]) for p in client.get("/projects", headers=staff.auth).json()}
     assert totals == {"Bamban Plant": Decimal("1250.35"), "Other": Decimal("5.00")}
     summary = client.get("/projects/Bamban Plant/summary", headers=staff.auth).json()
@@ -57,22 +57,22 @@ def test_anyone_can_add_an_entry_and_it_is_logged(client, db, staff):
 
 
 def test_adding_to_existing_project_does_not_create_another(client, db, staff):
-    add_entry(client, staff, cv_no="CV-1")
-    add_entry(client, staff, cv_no="CV-2")
+    add_entry(client, staff, cv_no="100001")
+    add_entry(client, staff, cv_no="100002")
     assert len(client.get("/projects", headers=staff.auth).json()) == 1
     assert len(logs(db, "project_create")) == 1
 
 
 def test_entry_list_has_project_title_newest_first(client, staff):
-    add_entry(client, staff, cv_no="CV-1")
-    add_entry(client, staff, project="Second", cv_no="CV-2")
+    add_entry(client, staff, cv_no="100001")
+    add_entry(client, staff, project="Second", cv_no="100002")
     rows = client.get("/disbursements/", headers=staff.auth).json()
-    assert [(r["cv_no"], r["project_title"]) for r in rows] == [("CV-2", "Second"), ("CV-1", "Bamban Plant")]
+    assert [(r["cv_no"], r["project_title"]) for r in rows] == [("100002", "Second"), ("100001", "Bamban Plant")]
 
 
 def test_amounts_keep_centavos_exactly(client, staff):
     e = add_entry(client, staff, amount="0.10")
-    add_entry(client, staff, cv_no="CV-2", amount="0.20")
+    add_entry(client, staff, cv_no="100002", amount="0.20")
     assert Decimal(e["amount"]) == Decimal("0.10")
     total = client.get("/projects/Bamban Plant/summary", headers=staff.auth).json()["total_amount"]
     assert Decimal(total) == Decimal("0.30")  # not 0.30000000000000004
@@ -99,9 +99,9 @@ def test_cannot_add_to_archived_project(client, admin, staff):
     add_entry(client, staff)
     pid = client.get("/projects", headers=admin.auth).json()[0]["id"]
     client.delete(f"/projects/{pid}", headers=admin.auth)
-    r = client.post("/disbursements/", headers=staff.auth, json=entry_payload(cv_no="CV-9"))
+    r = client.post("/disbursements/", headers=staff.auth, json=entry_payload(cv_no="100009"))
     assert r.status_code == 400 and "archived" in r.json()["detail"]
-    assert client.post("/projects", headers=staff.auth, json={"title": "Bamban Plant"}).status_code == 400
+    assert new_project(client, staff, "Bamban Plant").status_code == 400
 
 
 # ---------- Admin edits ----------
@@ -154,9 +154,31 @@ def test_invalid_edit_values_are_refused(client, admin, staff):
 
 
 def test_spaces_around_text_are_removed(client, staff):
-    e = add_entry(client, staff, cv_no="  CV-77 ", payee=" Acme  ")
-    assert (e["cv_no"], e["payee"]) == ("CV-77", "Acme")
+    e = add_entry(client, staff, cv_no="  100077 ", payee=" Acme  ")
+    assert (e["cv_no"], e["payee"]) == ("100077", "Acme")
 
 
 def test_blank_project_title_is_refused(client, staff):
-    assert client.post("/projects", headers=staff.auth, json={"title": "   "}).status_code == 422
+    assert new_project(client, staff, "   ").status_code == 422
+
+
+# ---------- CV no.: numbers only ----------
+
+@pytest.mark.parametrize("cv", ["CV-001", "12 34", "12a", "-5", "1.5", "1" * 31])
+def test_cv_no_must_be_numbers_only(client, staff, cv):
+    r = client.post("/disbursements/", headers=staff.auth, json=entry_payload(cv_no=cv))
+    assert r.status_code == 422 and "numbers only" in r.text
+
+
+def test_cv_no_keeps_leading_zeros_and_trims_spaces(client, staff):
+    r = client.post("/disbursements/", headers=staff.auth, json=entry_payload(cv_no=" 000123 "))
+    assert r.status_code == 201 and r.json()["cv_no"] == "000123"
+
+
+def test_editing_to_a_cv_with_letters_is_refused(client, admin, staff):
+    e = add_entry(client, staff)
+    r = client.patch(f"/disbursements/{e['id']}", headers=admin.auth, json={"cv_no": "CV-9", "editor_name": "A"})
+    assert r.status_code == 422
+    r = client.post(f"/disbursements/{e['id']}/edit-request", headers=staff.auth,
+                    json={"cv_no": "CV-9", "editor_name": "S", "reason": "typo"})
+    assert r.status_code == 422

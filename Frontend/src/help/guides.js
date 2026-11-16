@@ -66,12 +66,24 @@ export const GUIDES = [
 
   // ---------- Projects & entries ----------
   {
+    id: "view-po", cat: "entries", roles: "all",
+    title: "View a project's purchase order",
+    summary: "Open the PO file (PDF) of a project.",
+    steps: [
+      "In **Voucher Control**, find the project. The **PO NUMBER** and **PO AMOUNT** columns show its purchase order.",
+      "Click **View PDF** in the **PO FILE** column. The PO opens in a new browser tab, where you can read, print or save it.",
+      "Inside a project (**View**), **View PO (PDF)** under the project name does the same.",
+    ],
+    tips: ["Admins can add a PO to an older project, or correct one, with **Add PO** / **Edit PO**."],
+    go: { page: "home" },
+  },
+  {
     id: "find", cat: "entries", roles: "all",
     title: "Find a project, payee or voucher",
     summary: "Search, filter, sort and open a project.",
     steps: [
-      "Type in the **search bar** at the top: part of a project title, a payee, or a CV number.",
-      "Use the **Filter by** chips to choose where to look: **Project Title**, **Payee / Particulars**, or both.",
+      "Type in the **search bar** at the top: part of a project title, a payee or a PO number. Inside a project, the search finds entries by payee or CV number.",
+      "Use the **Filter by** chips to choose where to look: **Project Title** (the default), **Payee / Particulars** or **PO Number**. The search looks in that one field only.",
       "Click a column title such as **PROJECT TITLE** or **TOTAL DISBURSEMENT AMOUNT** to sort. Click again to reverse.",
       "Click **View** on a project to see its entries (the *Summary of Expenses*). **← Back** returns to the list.",
     ],
@@ -84,7 +96,7 @@ export const GUIDES = [
     steps: [
       "In **Voucher Control**, click **View** on the project.",
       "Click **+ Add new record**.",
-      "Fill in **Date**, **CV no.**, **Payee / Particulars** and **Amount (PHP)**.",
+      "Fill in **Date**, **CV no.** (numbers only), **Payee / Particulars** and **Amount (PHP)**.",
       "Click **Add record**. The entry is saved with your name as the encoder, and appears for everyone right away.",
     ],
     go: { page: "home" },
@@ -92,13 +104,16 @@ export const GUIDES = [
   {
     id: "new-project", cat: "entries", roles: "all",
     title: "Create a project",
-    summary: "Start a new project to record entries in.",
+    summary: "Start a new project with its purchase order.",
     steps: [
       "In **Voucher Control**, click **+ Create new project**.",
-      "Type the **Project title** and click **Create project**.",
+      "Fill in the **Project title**, the **PO number** (numbers only), the **PO amount**, and attach the **PO file** (PDF, up to 10 MB). All four are required.",
+      "Click **Create project**. The PO number must be new: no two projects can share one.",
       "Open it with **View** and add its first entry with **+ Add new record**.",
     ],
-    tips: ["Projects are also created automatically by an import, if the file has a new project title."],
+    tips: [
+      "Projects are also created by an import, if the file has a new project title. Those have no PO yet: an admin adds it with **Add PO**.",
+    ],
     go: { page: "home" },
   },
   {
@@ -128,11 +143,11 @@ export const GUIDES = [
   {
     id: "archive-entry", cat: "entries", roles: "admin",
     title: "Archive an entry",
-    summary: "Remove an entry from its project (restorable for 30 days).",
+    summary: "Remove an entry from its project (restorable for {retention}).",
     steps: [
       "Open the project with **View** and click **Archive** on the entry's row.",
       "Confirm with **Archive**. The entry disappears from the project and its totals.",
-      "It can be restored for 30 days: **User Panel → Activity Log → Archived**. After that it's deleted permanently.",
+      "It can be restored for {retention}: **User Panel → Activity Log → Archived**. After that it's deleted permanently.",
     ],
     go: { page: "home" },
   },
@@ -177,7 +192,8 @@ export const GUIDES = [
     summary: "Add many entries at once from a CSV (admins).",
     steps: [
       "In **Voucher Control**, click **Import File**.",
-      "If you need the format, click **Download a template**: the columns are project_title, date, cv_no, payee, amount.",
+      "If you need the format, click **Download a template**: the columns are project_title, po_number, po_amount, date, cv_no, payee, amount. Every row of a project names the same PO; a new project needs its PO number and PO amount.",
+      "New projects are created with their PO. A CSV can't hold the PO file: attach each PDF afterwards with **Edit PO** in Voucher Control.",
       "Choose your **CSV file**. The app checks every row first and lists any problems (with the line number).",
       "Click **Import … rows**. Rows with problems are skipped; fix them in the file and import those again if needed.",
     ],
@@ -190,7 +206,7 @@ export const GUIDES = [
     steps: [
       "In **Voucher Control**, click **Archive** on a project's row, or tick several projects and click **Archive selected**.",
       "The confirmation shows the projects and how many entries go with them. Confirm with **Archive**.",
-      "They can be restored for 30 days: **User Panel → Activity Log → Archived → Projects**.",
+      "They can be restored for {retention}: **User Panel → Activity Log → Archived → Projects**.",
     ],
     go: { page: "home" },
   },
@@ -230,7 +246,7 @@ export const GUIDES = [
       "Copy the **temporary password** shown (it's shown only once) and give it to the person privately.",
       "They sign in with it and must choose a new password straight away.",
     ],
-    tips: ["Manage Users → Manage → **Reset password** does the same without a request."],
+    tips: ["**Settings → Manage Users** → Manage → **Reset password** does the same without a request."],
     go: { page: "user", section: "activity" },
   },
   {
@@ -238,12 +254,12 @@ export const GUIDES = [
     title: "Approve new accounts and name changes",
     summary: "Let new people in, and approve staff name changes (admins).",
     steps: [
-      "Open **User Panel → Manage Users**. A red number on that tab means someone is waiting.",
+      "Open **Settings → Manage Users** (your name at the top right → **Settings**). A red number on that tab means someone is waiting.",
       "**Name change requests** are listed first: optionally add a note, then **Approve** or **Reject**.",
       "In the user list, new accounts are shown first as **Waiting for approval**. Click **Review**.",
       "**Approve** lets them sign in. **Reject** removes the account so the username can be used again.",
     ],
-    go: { page: "user", section: "users" },
+    go: { page: "settings", section: "users" },
   },
   {
     id: "other-device", cat: "requests", roles: "all",
@@ -317,7 +333,7 @@ export const GUIDES = [
   {
     id: "archived", cat: "admin", roles: "admin",
     title: "Restore or permanently delete archived items",
-    summary: "Bring items back, or erase them before the 30 days are up.",
+    summary: "Bring items back, or erase them before they're deleted automatically (after {retention}).",
     steps: [
       "Open **User Panel → Activity Log → Archived**, then choose **Projects** or **Entries**.",
       "**Restore** brings an item back (a project with the entries archived with it). **Deletes in** shows how long until it's deleted automatically.",
@@ -327,17 +343,79 @@ export const GUIDES = [
     go: { page: "user", section: "activity" },
   },
   {
+    id: "retention-setting", cat: "admin", roles: "admin",
+    title: "Change how long archived items are kept",
+    summary: "Set how many days archived items can be restored (now {retention}).",
+    steps: [
+      "Open your name at the top right, click **Settings**, then the **System** tab.",
+      "Under **Archived items**, enter the number of days, from 1 to 365.",
+      "Click **Save changes**. The new period applies to everything already archived, too.",
+      "If you shorten it, a warning shows how many archived items are already older than that. They're deleted within the hour, so restore any you need first.",
+    ],
+    go: { page: "settings", section: "system" },
+  },
+  {
+    id: "security-settings", cat: "admin", roles: "admin",
+    title: "Sign-in and security settings",
+    summary: "Account lock, automatic sign-out, one device per account, Create account and Forgot password.",
+    steps: [
+      "Open your name at the top right, click **Settings**, then the **Security** tab.",
+      "**Sign-in**: how many wrong passwords lock an account, for how long, and how many idle minutes before people are signed out.",
+      "**Devices**: turn *One signed-in device per account* on or off, and list accounts that may be signed in on several devices.",
+      "**Sign-up and password resets**: turn **Create account** and **Forgot password** on the sign-in page on or off, and limit how many new accounts can be made.",
+      "Click **Save changes**. Changes apply within a few seconds; a new sign-out time applies as people keep using the app.",
+    ],
+    go: { page: "settings", section: "security" },
+  },
+  {
+    id: "request-settings", cat: "admin", roles: "admin",
+    title: "Decide whether staff edits need approval",
+    summary: "Let staff edits apply straight away, or require a reason for every edit request.",
+    steps: [
+      "Open **Settings → Requests**.",
+      "Turn off **Staff edits need an admin's approval** to apply staff edits straight away. They're still recorded in the Activity Log, and archiving still needs approval.",
+      "Turn on **Staff must give a reason for edit requests** to make the reason required.",
+      "Click **Save changes**.",
+    ],
+    go: { page: "settings", section: "requests" },
+  },
+  {
+    id: "system-settings", cat: "admin", roles: "admin",
+    title: "Backups, Activity Log clean-up and the assistant",
+    summary: "Backup time and how many to keep, Back up now, old log rows, assistant on/off.",
+    steps: [
+      "Open **Settings → System**.",
+      "**Backups**: the daily backup hour (Philippine time) and how many daily, weekly and monthly backups to keep. **Back up now** makes an extra backup within a minute; the result shows above the button.",
+      "**Activity Log**: delete routine rows (sign-ins, exports, assistant questions) after a number of days. 0 keeps everything; changes to records are always kept.",
+      "**Assistant**: for everyone, admins only, or off.",
+      "Click **Save changes**.",
+    ],
+    go: { page: "settings", section: "system" },
+  },
+  {
+    id: "company-settings", cat: "admin", roles: "admin",
+    title: "Company name, logo and currency",
+    summary: "Change what the sign-in page, exports and the assistant show.",
+    steps: [
+      "Open **Settings → Company**.",
+      "**Upload logo** (PNG, JPEG or WebP, up to 1 MB), or go back to the built-in one.",
+      "Change the **Company name**, the **Short name** (browser tab title) or the **Currency**. Amounts already saved aren't converted; only how they're shown changes.",
+      "Click **Save changes**.",
+    ],
+    go: { page: "settings", section: "company" },
+  },
+  {
     id: "manage-users", cat: "admin", roles: "admin",
     title: "Manage user accounts",
     summary: "Roles, deactivating, password resets and deleting accounts.",
     steps: [
-      "Open **User Panel → Manage Users** and click **Manage** on the person.",
+      "Open **Settings → Manage Users** (your name at the top right → **Settings**) and click **Manage** on the person.",
       "**Make admin** / **Remove admin** changes their role. **Deactivate** stops them signing in but keeps their history.",
       "**Reset password** gives a temporary password (shown once); they choose a new one at sign-in.",
       "**Delete account** is permanent: type their username to confirm. Deactivating is usually better.",
     ],
     tips: ["You can't remove the last admin, or deactivate or delete yourself."],
-    go: { page: "user", section: "users" },
+    go: { page: "settings", section: "users" },
   },
   {
     id: "who-is-online", cat: "account", roles: "staff",
@@ -360,7 +438,7 @@ export const GUIDES = [
     title: "See who is active",
     summary: "Who has the app open right now, who is idle, and when others were last seen.",
     steps: [
-      "Open **User Panel → Manage Users**. The line above the list counts who is **active**, **idle** and **offline**.",
+      "Open **Settings → Manage Users** (your name at the top right → **Settings**). The line above the list counts who is **active**, **idle** and **offline**.",
       "A **green dot** on someone's picture means they're using the app now. **Yellow** means it's open but they haven't clicked or typed for a few minutes.",
       "The **Online** column says **Active now**, **Idle** (and when they last used the app), or when they were **last seen**, with their last sign-in below.",
       "Tick **Online now only** to list just the people who have the app open.",
@@ -369,7 +447,7 @@ export const GUIDES = [
       "It updates by itself every 30 seconds.",
       "Staff see the same online status (without sign-in times) in their **Active Status** tab.",
     ],
-    go: { page: "user", section: "users" },
+    go: { page: "settings", section: "users" },
   },
   {
     id: "backups", cat: "admin", roles: "admin",
@@ -391,7 +469,7 @@ export const GUIDES = [
     summary: "Questions about projects, payees and totals, in plain words.",
     steps: [
       "Click the **yellow chat button** at the bottom right.",
-      "Ask, for example: *Which projects spent the most this year?*, *Show the latest payments to Laguna Steel*, *Who created CV-12234?*",
+      "Ask, for example: *Which projects spent the most this year?*, *Show the latest payments to Laguna Steel*, *Who created CV 260012?*",
       "Follow-up questions work (*who edited it?*). **New chat** starts over; **Expand** makes the window bigger.",
       "It only reads the records: it can't add, change or archive anything. Double-check important figures.",
     ],

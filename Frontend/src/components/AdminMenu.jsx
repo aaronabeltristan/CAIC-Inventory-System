@@ -17,6 +17,7 @@ export default function AdminMenu({
   onUserPanel,
   onHome,
   onHelp,
+  onSettings,
   onLogout,
   pendingCount = 0,
   accountsCount = 0,
@@ -82,10 +83,7 @@ export default function AdminMenu({
             }}
           >
             User Panel
-            <CountBadge
-              count={pendingCount + accountsCount}
-              label={user.is_superuser ? "pending requests" : "new responses"}
-            />
+            <CountBadge count={pendingCount} label={user.is_superuser ? "pending requests" : "new responses"} />
           </button>
           {onHelp && (
             <button
@@ -96,6 +94,18 @@ export default function AdminMenu({
               }}
             >
               User Guides
+            </button>
+          )}
+          {user.is_superuser && onSettings && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onSettings();
+              }}
+            >
+              Settings
+              <CountBadge count={accountsCount} label="accounts waiting" />
             </button>
           )}
           <button role="menuitem" onClick={onLogout}>

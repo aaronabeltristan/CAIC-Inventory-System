@@ -12,6 +12,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+import app_settings
 import database
 import models
 
@@ -27,22 +28,17 @@ if len(SECRET_KEY) < 32:
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Sign-in protection: after this many wrong passwords for one username, that username can't
-# sign in for LOGIN_LOCK_MINUTES (counted from the oldest of those wrong tries). A successful
-# sign-in starts the count again. Uses the login_failed rows already in the Activity Log, so it
-# works the same across all backend processes.
-# One signed-in device per account (see sessions.py). SINGLE_SESSION=false turns it off;
-# SINGLE_SESSION_EXEMPT lists usernames it doesn't apply to (e.g. load-test accounts).
-SINGLE_SESSION = os.getenv("SINGLE_SESSION", "true").strip().lower() not in ("0", "false", "no", "off")
-SINGLE_SESSION_EXEMPT = {u.strip() for u in os.getenv("SINGLE_SESSION_EXEMPT", "").split(",") if u.strip()}
+# Sign-in protection: after login_max_failures wrong passwords for one username, that username
+# can't sign in for login_lock_minutes (counted from the oldest of those wrong tries). A
+# successful sign-in starts the count again. Uses the login_failed rows already in the Activity
+# Log, so it works the same across all backend processes.
+# One signed-in device per account (see sessions.py): settings single_session and
+# single_session_exempt (usernames it doesn't apply to, e.g. load-test accounts).
+# All are set in Settings → Security; the defaults come from .env (app_settings.py).
 
 
 def single_session_applies(user: models.User) -> bool:
-    return SINGLE_SESSION and user.username not in SINGLE_SESSION_EXEMPT
-
-
-LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))
-LOGIN_LOCK_MINUTES = int(os.getenv("LOGIN_LOCK_MINUTES", "15"))
+    return bool(app_settings.get("single_session")) and user.username.lower() not in app_settings.exempt_usernames()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -95,7 +91,9 @@ def note_event(db: Session, kind: str, ip: str) -> None:
 def login_locked_minutes(db: Session, username: str) -> int:
     """Minutes until this username may try again after too many wrong passwords, else 0."""
     now = datetime.now(timezone.utc)
-    since = now - timedelta(minutes=LOGIN_LOCK_MINUTES)
+    max_failures = app_settings.get("login_max_failures")
+    lock_minutes = app_settings.get("login_lock_minutes")
+    since = now - timedelta(minutes=lock_minutes)
     last_ok = (
         db.query(func.max(models.ActivityLog.created_at))
         .filter(models.ActivityLog.actor == username, models.ActivityLog.action == "login")
@@ -113,15 +111,15 @@ def login_locked_minutes(db: Session, username: str) -> int:
             models.ActivityLog.created_at > since,
         )
         .order_by(models.ActivityLog.created_at.desc())
-        .limit(LOGIN_MAX_FAILURES)
+        .limit(max_failures)
         .all()
     )
-    if len(recent) < LOGIN_MAX_FAILURES:
+    if len(recent) < max_failures:
         return 0
     oldest = recent[-1][0]
     if oldest.tzinfo is None:
         oldest = oldest.replace(tzinfo=timezone.utc)
-    seconds = (oldest + timedelta(minutes=LOGIN_LOCK_MINUTES) - now).total_seconds()
+    seconds = (oldest + timedelta(minutes=lock_minutes) - now).total_seconds()
     return max(1, math.ceil(seconds / 60)) if seconds > 0 else 0
 
 

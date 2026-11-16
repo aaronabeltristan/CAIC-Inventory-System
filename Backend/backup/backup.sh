@@ -1,8 +1,10 @@
 #!/bin/sh
 # CAIC database backups. Runs in the "backup" container (see docker-compose.yml).
 #
-#   backup.sh schedule            keep running: one backup a day at BACKUP_HOUR (Philippine time),
-#                                 or as soon as the server is on if that time was missed
+#   backup.sh schedule            keep running: one backup a day at the hour set in the app
+#                                 (Settings → System; BACKUP_HOUR until an admin saves one),
+#                                 or as soon as the server is on if that time was missed. Also
+#                                 makes a backup when an admin clicks "Back up now" (checked every minute)
 #   backup.sh now [label]         back up right away (saved under manual/)
 #   backup.sh list                show the backups
 #   backup.sh restore FILE        restore FILE into a separate database, caic_db_restore, to check it
@@ -16,9 +18,12 @@ set -u
 ROOT=${BACKUP_ROOT:-/backups}
 DB=${PGDATABASE:-caic_db}
 HOUR=${BACKUP_HOUR:-2}
-KEEP_DAILY=${KEEP_DAILY:-7}
-KEEP_WEEKLY=${KEEP_WEEKLY:-4}
-KEEP_MONTHLY=${KEEP_MONTHLY:-6}
+KEEP_DAILY_DEFAULT=${KEEP_DAILY:-7}
+KEEP_WEEKLY_DEFAULT=${KEEP_WEEKLY:-4}
+KEEP_MONTHLY_DEFAULT=${KEEP_MONTHLY:-6}
+KEEP_DAILY=$KEEP_DAILY_DEFAULT
+KEEP_WEEKLY=$KEEP_WEEKLY_DEFAULT
+KEEP_MONTHLY=$KEEP_MONTHLY_DEFAULT
 DAILY=$ROOT/daily
 WEEKLY=$ROOT/weekly
 MONTHLY=$ROOT/monthly
@@ -27,6 +32,34 @@ export GNUPGHOME="${GNUPGHOME:-/tmp/gnupg}"
 mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
 
 log() { echo "[backup] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+# A value saved in the app's Settings (table app_settings), or $2 if there's none / it isn't a
+# whole number in range $3..$4. Never fails: if the database or table isn't there, the default.
+setting_int() {
+  v=$(psql -tAX -c "SELECT value FROM app_settings WHERE key = '$1'" 2>/dev/null | tr -d '[:space:]')
+  case "$v" in
+    ''|*[!0-9]*) echo "$2" ;;
+    *) if [ "$v" -ge "$3" ] && [ "$v" -le "$4" ]; then echo "$v"; else echo "$2"; fi ;;
+  esac
+}
+
+# Reads the schedule and how many backups to keep from the app (Settings → System)
+load_settings() {
+  HOUR=$(setting_int backup_hour "${BACKUP_HOUR:-2}" 0 23)
+  KEEP_DAILY=$(setting_int backup_keep_daily "${KEEP_DAILY_DEFAULT}" 1 90)
+  KEEP_WEEKLY=$(setting_int backup_keep_weekly "${KEEP_WEEKLY_DEFAULT}" 0 104)
+  KEEP_MONTHLY=$(setting_int backup_keep_monthly "${KEEP_MONTHLY_DEFAULT}" 0 120)
+}
+
+# "Back up now" in the app: a non-empty backup_request row. Cleared once handled.
+backup_requested() {
+  v=$(psql -tAX -c "SELECT value FROM app_settings WHERE key = 'backup_request'" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$v" ]
+}
+clear_backup_request() {
+  psql -q -X -c "UPDATE app_settings SET value = '' WHERE key = 'backup_request'" >/dev/null 2>&1 \
+    || log "couldn't clear the backup request"
+}
 
 need_passphrase() {
   if [ -z "${BACKUP_PASSPHRASE:-}" ]; then
@@ -114,9 +147,23 @@ prune() {
 
 schedule() {
   need_passphrase
+  wait_for_db >/dev/null 2>&1
+  load_settings
   log "running: daily backup from ${HOUR}:00 Philippine time; keeping $KEEP_DAILY daily, $KEEP_WEEKLY weekly, $KEEP_MONTHLY monthly"
   last_fail=0
+  last_shown="$HOUR/$KEEP_DAILY/$KEEP_WEEKLY/$KEEP_MONTHLY"
   while true; do
+    load_settings
+    shown="$HOUR/$KEEP_DAILY/$KEEP_WEEKLY/$KEEP_MONTHLY"
+    if [ "$shown" != "$last_shown" ]; then
+      log "settings changed: daily backup from ${HOUR}:00; keeping $KEEP_DAILY daily, $KEEP_WEEKLY weekly, $KEEP_MONTHLY monthly"
+      last_shown=$shown
+    fi
+    if backup_requested; then
+      clear_backup_request
+      log "backup requested from the app"
+      wait_for_db && backup "$MANUAL" requested
+    fi
     today=$(date +%Y-%m-%d)
     hour=$(date +%H)
     now=$(date +%s)
@@ -131,7 +178,7 @@ schedule() {
         last_fail=$now
       fi
     fi
-    sleep 600
+    sleep 60
   done
 }
 

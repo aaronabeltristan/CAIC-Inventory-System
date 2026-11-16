@@ -20,6 +20,7 @@ import schemas
 import security
 import deletion_requests
 import activity
+import app_settings
 import password_resets
 import users_admin
 import imports
@@ -28,22 +29,34 @@ import chatbot
 import profiles
 import sessions
 import bulk
+import settings
+import purchase_orders
 
 # Create database tables automatically, then add any new columns to existing tables
 models.Base.metadata.create_all(bind=database.engine)
 database.ensure_schema()
 database.flag_default_passwords()
 
-# Deletes anything archived more than 30 days ago. Runs at startup, then every hour.
+# Deletes anything archived longer ago than the retention period admins set in Settings
+# (30 days by default). Runs at startup, then every hour.
+# Also deletes old routine Activity Log rows (Settings → System). PURGE_ENABLED=false in
+# Backend/.env turns both off: for a local backend pointed at the real database while
+# testing, so it can't delete real data.
 PURGE_EVERY_SECONDS = 60 * 60
+PURGE_ENABLED = os.getenv("PURGE_ENABLED", "true").strip().lower() not in ("0", "false", "no", "off")
 
 
 def purge_once() -> None:
+    if not PURGE_ENABLED:
+        return
     db = database.SessionLocal()
     try:
         removed = activity.purge_expired(db)
         if removed:
             print(f"[purge] permanently deleted {removed} archived record(s)")
+        cleaned = activity.purge_routine_logs(db)
+        if cleaned:
+            print(f"[purge] deleted {cleaned} old routine Activity Log row(s)")
     except Exception as e:  # another server may have purged the same rows first
         db.rollback()
         print(f"[purge] skipped: {e}")
@@ -58,6 +71,8 @@ async def lifespan(app: FastAPI):
             await run_in_threadpool(purge_once)
             await asyncio.sleep(PURGE_EVERY_SECONDS)
 
+    if not PURGE_ENABLED:
+        print("[purge] off (PURGE_ENABLED=false): archived items won't be deleted automatically")
     task = asyncio.create_task(loop())
     watcher = asyncio.create_task(live.hub.run())  # live updates (see live.py)
     yield
@@ -77,6 +92,8 @@ app.include_router(chatbot.router)
 app.include_router(profiles.router)
 app.include_router(sessions.router)
 app.include_router(bulk.router)
+app.include_router(settings.router)
+app.include_router(purchase_orders.router)
 # Which other websites may call the API from a browser. The app itself doesn't need this: it's
 # served from the same address (nginx passes /api/... on). Only developers running
 # "npm run dev" against the shared backend do, so by default that's all that's allowed.
@@ -100,9 +117,8 @@ app.add_middleware(
 USERNAME_RULE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,49}$")
 RESERVED_USERNAMES = {"system", "admin", "administrator", "root", "superuser", "support", "caic",
                       "api", "null", "undefined", "everyone", "staff", "anonymous"}
-REGISTER_PER_IP = int(os.getenv("REGISTER_PER_IP_PER_HOUR", "10"))
-REGISTER_TOTAL = int(os.getenv("REGISTER_TOTAL_PER_HOUR", "30"))
-MAX_WAITING_ACCOUNTS = int(os.getenv("MAX_WAITING_ACCOUNTS", "50"))
+# Limits on sign-ups: Settings → Security (register_per_ip_per_hour, register_total_per_hour,
+# max_waiting_accounts, allow_registration). Defaults from .env, see app_settings.py.
 
 
 @app.post(
@@ -115,6 +131,11 @@ def register_user(
     payload: schemas.UserCreate, request: Request, db: Session = Depends(database.get_db)
 ):
     """Registers a new user account. It can't sign in until an admin approves it."""
+    if not app_settings.get("allow_registration"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="New accounts can't be created here right now. Ask an admin to add you.",
+        )
     username = payload.username.strip()
     if not USERNAME_RULE.match(username):
         raise HTTPException(
@@ -133,13 +154,14 @@ def register_user(
         )
     # Sign-ups are open to anyone with the link, so limit how fast accounts can be made
     ip = security.client_ip(request)
-    if security.rate_limited(db, "register", ip, per_ip=REGISTER_PER_IP, total=REGISTER_TOTAL, minutes=60):
+    if security.rate_limited(db, "register", ip, per_ip=app_settings.get("register_per_ip_per_hour"),
+                             total=app_settings.get("register_total_per_hour"), minutes=60):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many new accounts were made recently. Please try again later or ask an admin.",
         )
     waiting = db.query(func.count(models.User.id)).filter(models.User.is_approved.is_(False)).scalar()
-    if waiting >= MAX_WAITING_ACCOUNTS:
+    if waiting >= app_settings.get("max_waiting_accounts"):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many accounts are waiting for approval. Ask an admin to review them first.",
@@ -283,31 +305,7 @@ def read_all_projects(
     return crud.get_all_projects(db)
 
 
-@app.post(
-    "/projects",
-    response_model=schemas.ProjectResponse,
-    status_code=status.HTTP_201_CREATED,
-    tags=["Projects"],
-)
-def create_project(
-    payload: schemas.ProjectCreate,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(security.get_current_user),
-):
-    """Allows creating a new project directly without needing an initial disbursement record."""
-    existing_project = crud.get_project_by_title(db, title=payload.title)
-    if existing_project and existing_project.is_archived:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A project with this title is archived. An admin can restore it from Activity Log \u2192 Archived.")
-    if existing_project:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Project with this title already exists",
-        )
-    project = crud.create_project(db, project_in=payload)
-    activity.log(db, current_user.username, "project_create", f"Created project '{project.title}'",
-                 "project", project.id)
-    db.commit()
-    return project
+# Creating a project (with its purchase order): see purchase_orders.py
 
 
 @app.delete(
@@ -321,7 +319,7 @@ def archive_project(
     current_user: models.User = Depends(security.get_current_superuser),
 ):
     """Admins only: archives a project together with all its entries. It can be restored
-    from the Activity Log for 30 days, then it is deleted permanently."""
+    from the Activity Log for the retention period set in Settings, then it is deleted permanently."""
     project = db.get(models.Project, project_id, with_for_update=True)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")

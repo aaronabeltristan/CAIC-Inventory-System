@@ -4,19 +4,23 @@ import VoucherControl from "./ProjectsTable";
 import SummaryOfExpenses from "./SummaryOfExpenses";
 import EntryDialog from "./EntryDialog";
 import PasswordDialog from "./PasswordDialog";
-import CreateProjectDialog from "./ProjectDialog";
+import ProjectDialog from "./ProjectDialog";
+import { openPoFile } from "../utils/openPoFile";
 import ChatWidget from "./ChatWidget";
 import UsersDialog from "./UsersDialog";
 import ImportDialog from "./ImportDialog";
-import logo from "../assets/logo.webp";
+import Logo from "./Logo";
 import UserPanel from "./UserPanel";
 import LoginRequestDialog from "./LoginRequestDialog";
 import HelpCenter from "./HelpCenter";
+import SettingsPage from "./SettingsPage";
+import { setAppSettings, useAppSettings } from "../hooks/useAppSettings";
 import { bulkMessage } from "../hooks/useSelection";
 
 const FILTERS = [
   { key: "project_title", label: "Project Title" },
   { key: "payee", label: "Payee / Particulars" },
+  { key: "po_number", label: "PO Number" },
 ];
 
 const SIGNED_OUT_ELSEWHERE =
@@ -60,6 +64,7 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
   }, [loadProfile, profileVersion]);
   const [projects, setProjects] = useState([]);
   const [creatingProject, setCreatingProject] = useState(false);
+  const [editingPo, setEditingPo] = useState(null); // admins: project whose PO is being added/changed
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState(null); // null = voucher list, string = project title
@@ -67,7 +72,8 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
-  const [fields, setFields] = useState(["project_title", "payee"]);
+  // The search looks in one field at a time (Filter by): project title, payee or PO number
+  const [fields, setFields] = useState(["project_title"]);
   const [dialog, setDialog] = useState(null); // { mode: "create" | "edit", entry? }
   const [pwOpen, setPwOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
@@ -89,6 +95,13 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
   // recount cancels the one before it, so an answer that arrives late can't bring the badge back.
   const [pendingVersion, setPendingVersion] = useState(0);
   const reqId = useRef(0);
+
+  // Settings that change what people see (archive period, currency, assistant on/off...).
+  // Reloaded on live updates, so a change made by an admin shows up everywhere.
+  const settings = useAppSettings();
+  useEffect(() => {
+    api.getSettings?.().then((s) => setAppSettings(s.values), () => {});
+  }, [api, liveVersion]);
 
   const loadEntries = useCallback(async () => {
     try {
@@ -258,14 +271,29 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
   }, [api, user.username, onSessionEnded]);
 
 
-  const toggleField = (key) =>
-    setFields((f) => (f.includes(key) ? f.filter((k) => k !== key) : [...f, key]));
+  const toggleField = (key) => setFields([key]);
 
-  async function handleCreateProject(title) {
-    await api.createProject(title);
+  async function handleCreateProject(data) {
+    await api.createProject(data);
     await loadEntries();
     setCreatingProject(false);
-    setToast("Project created.");
+    setToast(`Project created with PO ${data.po_number}.`);
+  }
+
+  async function handleSavePo({ po_number, amount, file }) {
+    const p = editingPo;
+    await api.updateProjectPo(p.id, { po_number, amount, file });
+    setEditingPo(null);
+    await refresh();
+    setToast(`PO saved for ${p.project_title}.`);
+  }
+
+  async function viewPo(p) {
+    try {
+      await openPoFile(api, p.id ?? p.project_id, `PO ${p.po_number || ""} · ${p.project_title}`);
+    } catch (e) {
+      setToast(e.message);
+    }
   }
 
   async function handleSave(payload) {
@@ -275,9 +303,12 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
     } else {
       try {
         if (!user.is_superuser) {
-          // Normal users' edits wait for an admin's approval
-          await api.requestEdit(dialog.entry.id, payload);
-          setToast("Edit request sent to an admin.");
+          // Normal users' edits wait for an admin's approval, unless Settings says they don't need it
+          const req = await api.requestEdit(dialog.entry.id, payload);
+          if (req?.status === "approved") {
+            setToast("Entry updated.");
+            await refresh();
+          } else setToast("Edit request sent to an admin.");
           setDialog(null);
           return;
         }
@@ -351,7 +382,7 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
       <header className="topbar">
         <div className="logo">
           <button type="button" className="logo-btn" onClick={goHome} aria-label="Go to Voucher Control">
-            <img src={logo} alt="Calamba Allied Industrial Corporation" />
+            <Logo />
           </button>
         </div>
 
@@ -364,18 +395,22 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
             <span className="sr">Search</span>
             <input
               type="search"
-              placeholder="Search a project"
+              placeholder={
+                fields[0] === "payee" ? "Search a payee" : fields[0] === "po_number" ? "Search a PO number" : "Search a project"
+              }
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
           </label>
-          <div className="filters" role="group" aria-label="Filter by">
+          <div className="filters" role="radiogroup" aria-label="Filter by">
             <span>Filter by:</span>
             {FILTERS.map((f) => (
               <button
                 key={f.key}
                 type="button"
                 className="chip"
+                role="radio"
+                aria-checked={fields.includes(f.key)}
                 aria-pressed={fields.includes(f.key)}
                 onClick={() => toggleField(f.key)}
               >
@@ -411,6 +446,11 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
               setPage("user");
             }}
             onHelp={() => setPage("help")}
+            onSettings={() => {
+              setUserSection(null);
+              setPanelKey((k) => k + 1);
+              setPage("settings");
+            }}
             onLogout={onLogout}
           />
         </div>
@@ -422,13 +462,23 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
           <HelpCenter
             user={user}
             onGo={(target) => {
-              if (target.page === "user") {
+              if (target.page === "user" || target.page === "settings") {
                 setUserSection(target.section || null);
                 setPanelKey((k) => k + 1);
-                setPage("user");
+                setPage(target.page);
               } else goHome();
               window.scrollTo(0, 0);
             }}
+          />
+        ) : page === "settings" && user.is_superuser ? (
+          <SettingsPage
+            key={panelKey}
+            initialSection={userSection}
+            api={api}
+            user={user}
+            version={liveVersion}
+            pending={pending}
+            onChanged={(msg) => { setToast(msg); refresh(); }}
           />
         ) : page === "user" ? (
           <UserPanel
@@ -470,10 +520,16 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
               fields={fields}
               isAdmin={user.is_superuser}
               onNew={() => setCreatingProject(true)}
-              onView={(e) => setView(e.project_title)}
+              onView={(e) => {
+                // The search found the project: start the project page with a clear search
+                setQ("");
+                setView(e.project_title);
+              }}
               onArchiveProject={handleArchiveProject}
               onBulkArchiveProjects={handleBulkArchiveProjects}
               onImport={() => setImportOpen(true)}
+              onViewPo={viewPo}
+              onEditPo={(p) => setEditingPo(p)}
             />
           ) : summary ? (
             <SummaryOfExpenses
@@ -491,6 +547,8 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
               onRequestDelete={handleRequestDelete}
               onBulkArchive={handleBulkArchive}
               onBulkRequest={handleBulkRequest}
+              onViewPo={viewPo}
+              onEditPo={(s) => setEditingPo({ ...s, id: s.project_id })}
             />
           ) : (
             <>
@@ -518,11 +576,9 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
       )}
 
       {creatingProject && (
-        <CreateProjectDialog
-          onSave={handleCreateProject}
-          onClose={() => setCreatingProject(false)}
-        />
+        <ProjectDialog onSave={handleCreateProject} onClose={() => setCreatingProject(false)} />
       )}
+      {editingPo && <ProjectDialog project={editingPo} onSave={handleSavePo} onClose={() => setEditingPo(null)} />}
       {loginRequests[0] && (
         <LoginRequestDialog
           key={loginRequests[0].id}
@@ -577,7 +633,9 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
           {toast}
         </div>
       )}
-      <ChatWidget api={api} user={user} />
+      {(settings.chat_access === "everyone" || (settings.chat_access === "admins" && user.is_superuser)) && (
+        <ChatWidget api={api} user={user} />
+      )}
     </div>
   );
 }

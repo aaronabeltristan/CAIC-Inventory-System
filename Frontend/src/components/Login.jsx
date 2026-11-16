@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { createApi } from "../api/api";
-import logo from "../assets/logo.webp";
+import Logo from "./Logo";
 import LoginSlideshow from "./LoginSlideshow";
 import { versionLabel } from "../version";
+import { useAppSettings } from "../hooks/useAppSettings";
 
 const EMPTY = { name: "", username: "", password: "", confirm: "", message: "" };
 
 export default function Login({ onLogin, onToken, signedOutReason, onRegister, onResetRequest }) {
   const [mode, setMode] = useState("login"); // "login" | "register" | "reset"
+  // Admins can turn Create account and Forgot password off (Settings → Security)
+  const { allow_registration: canRegister, allow_password_reset: canReset } = useAppSettings();
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(signedOutReason || ""); // e.g. "account created, waiting for approval"
@@ -121,7 +124,7 @@ export default function Login({ onLogin, onToken, signedOutReason, onRegister, o
     <main className="login">
       <LoginSlideshow />
       <header className="login-brand">
-        <img src={logo} alt="Calamba Allied Industrial Corporation" className="login-logo" />
+        <Logo className="login-logo" />
       </header>
 
       <form className="login-sheet" onSubmit={submit}>
@@ -219,7 +222,7 @@ export default function Login({ onLogin, onToken, signedOutReason, onRegister, o
                   />
                 </label>
               )}
-              {mode === "login" && (
+              {mode === "login" && canReset && (
                 <p className="forgot">
                   <button type="button" className="link" onClick={() => goTo("reset")}>
                     Forgot password?
@@ -248,6 +251,7 @@ export default function Login({ onLogin, onToken, signedOutReason, onRegister, o
                 {busy ? busyLabel : submitLabel}
               </button>
 
+              {(isReset || isRegister || canRegister) && (
               <p className="switch">
                 {isReset ? (
                   <>
@@ -265,6 +269,7 @@ export default function Login({ onLogin, onToken, signedOutReason, onRegister, o
                   </>
                 )}
               </p>
+              )}
             </>
           )}
         </div>

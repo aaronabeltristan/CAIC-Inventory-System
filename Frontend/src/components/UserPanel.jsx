@@ -1,14 +1,11 @@
 import { useRef, useState } from "react";
 import { fmtStamp } from "../utils/format";
 import Avatar, { squarePhoto } from "./Avatar";
-import NameRequests from "./NameRequests";
 import MyActivity from "./MyActivity";
 import SecurityInfo from "./SecurityInfo";
 import MyStats from "./MyStats";
-import BackupStatus from "./BackupStatus";
 import { ActivityLogContent } from "./ActivityLog";
 import { MyRequestsContent } from "./MyRequests";
-import { UsersContent } from "./UsersDialog";
 import OnlineUsers from "./OnlineUsers";
 import { CountBadge } from "./AdminMenu";
 
@@ -26,29 +23,18 @@ export default function UserPanel({
   onChanged,
 }) {
   const isAdmin = !!user.is_superuser;
-  const waitingAccounts = (pending?.accounts || 0) + (pending?.names || 0);
   // After changing the picture or name: reload the profile and say what happened
   const profileChanged = async (msg) => {
     await onProfileChanged?.();
     if (msg) onChanged?.(msg);
   };
 
-  // Admins: open on whatever needs them. Activity Log if requests/resets are waiting,
-  // otherwise Manage Users if an account is waiting, otherwise Activity Log.
-  // Staff open on My Requests.
-  const [section, setSection] = useState(() =>
-    initialSection ||
-    (!isAdmin
-      ? "requests"
-      : !(pending?.requests || pending?.resets) && (pending?.accounts || pending?.names)
-        ? "users"
-        : "activity")
-  );
+  // Admins open on the Activity Log, staff on My Requests. (Manage Users is under Settings.)
+  const [section, setSection] = useState(() => initialSection || (isAdmin ? "activity" : "requests"));
 
   const tabs = isAdmin
     ? [
         { key: "activity", label: "Activity Log", count: (pending?.requests || 0) + (pending?.resets || 0) },
-        { key: "users", label: "Manage Users", count: waitingAccounts },
         { key: "mine", label: "My Activity", count: 0 },
       ]
     : [
@@ -91,7 +77,6 @@ export default function UserPanel({
           </dl>
 
           <SecurityInfo api={api} version={version} onLogout={onLogout} />
-          {isAdmin && <BackupStatus api={api} version={version} />}
 
           <div className="profile-actions">
             <button className="pill create" onClick={onPassword}>
@@ -131,11 +116,6 @@ export default function UserPanel({
               <OnlineUsers api={api} user={user} version={version} />
             ) : section === "requests" ? (
               <MyRequestsContent api={api} version={version} onSeen={onSeen} />
-            ) : section === "users" ? (
-              <>
-                <NameRequests api={api} version={version} onChanged={onChanged} />
-                <UsersContent api={api} user={user} version={version} onChanged={onChanged} />
-              </>
             ) : (
               <ActivityLogContent api={api} user={user} version={version} pending={pending} onChanged={onChanged} />
             )}

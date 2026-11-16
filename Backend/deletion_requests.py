@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 import activity
+import app_settings
 import database
 import models
 import schemas
@@ -169,7 +170,9 @@ def request_edit(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(security.get_current_user),
 ):
-    """Ask an admin to change an entry. Nothing changes until it's approved."""
+    """Ask an admin to change an entry. Nothing changes until it's approved, unless
+    Settings → Requests says staff edits don't need approval: then it's applied straight away
+    (and recorded as an approved request, so it still shows in My Requests)."""
     d = _get_entry(db, disbursement_id)
     activity.check_unchanged(d, payload.original)
 
@@ -181,8 +184,32 @@ def request_edit(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing was changed.")
 
     reason = (payload.reason or "").strip()
-    changes = {"fields": fields, "editor_name": payload.editor_name or current_user.name}
+    if app_settings.get("edit_reason_required") and len(reason) < 3:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Give a reason for the change (at least 3 characters).")
+    editor = payload.editor_name or current_user.name
+    changes = {"fields": fields, "editor_name": editor}
     req = _new_request(d, current_user, "edit", reason, changes)
+
+    if not app_settings.get("staff_edits_need_approval") and not d.is_archived:
+        new_values = schemas.DisbursementUpdate(
+            **{k: v[1] for k, v in fields.items()}, editor_name=editor
+        ).model_dump(exclude_unset=True, exclude={"editor_name"})
+        for name, value in new_values.items():
+            setattr(d, name, value)
+        d.updated_by = editor
+        req.status = "approved"
+        req.reviewed_by = "system"
+        req.reviewed_at = datetime.now(timezone.utc)
+        req.review_note = "Applied straight away: staff edits don't need approval."
+        req.requester_seen = True
+        db.add(req)
+        db.flush()
+        activity.log(db, current_user.username, "update", f"Edited {activity.describe(d)} (no approval needed)",
+                     "disbursement", d.id, {"changes": fields, "reason": reason or None, "request_id": req.id})
+        db.commit()
+        db.refresh(req)
+        return req
+
     db.add(req)
     db.flush()
     activity.log(db, current_user.username, "edit_requested",

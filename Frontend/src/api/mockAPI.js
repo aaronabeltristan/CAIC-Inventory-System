@@ -269,8 +269,43 @@ const makeDisbursement = (body, id, stamp) => ({
   updated_by: currentUser.name,
 });
 
+// Demo copy of the settings admins change in Settings
+const mockSettings = {
+  company_name: "Calamba Allied Industrial Corporation",
+  company_short_name: "CAIC",
+  currency: "PHP",
+  logo_version: null,
+  allow_registration: true,
+  allow_password_reset: true,
+  archive_retention_days: 30,
+  session_idle_minutes: 30,
+  chat_access: "everyone",
+  staff_edits_need_approval: true,
+  edit_reason_required: false,
+};
+
 export function createMockApi() {
   return {
+    async getPublicSettings() {
+      return { ...mockSettings };
+    },
+
+    async getSettings() {
+      await delay(null);
+      return { values: { ...mockSettings } }; // no schema: the demo has no Settings page
+    },
+
+    async updateSettings(changes) {
+      await delay(null);
+      Object.assign(mockSettings, changes);
+      return { values: { ...mockSettings } };
+    },
+
+    async previewRetention(days) {
+      await delay(null);
+      return { archive_retention_days: Number(days), projects: 0, entries: 0 };
+    },
+
     // --------------------------------------------------
     // Authentication
     // --------------------------------------------------
@@ -392,9 +427,11 @@ export function createMockApi() {
       return getAllProjectTitles().map((title) => ({ title }));
     },
 
-    async createProject(title) {
+    async createProject(input) {
       await delay(null);
 
+      // The real app sends { title, po_number, amount, file }; the demo keeps only the title
+      const title = typeof input === "string" ? input : input?.title;
       const normalizedTitle = normalizeTitle(title);
 
       if (!normalizedTitle) {

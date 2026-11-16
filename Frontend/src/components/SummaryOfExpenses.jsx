@@ -4,6 +4,7 @@ import { cents, fmtDate, fmtStamp, money } from "../utils/format";
 import ConfirmDialog from "./ConfirmDialog";
 import { usePagination } from "../hooks/usePagination";
 import Pagination from "./Pagination";
+import { daysLabel, useRetentionDays } from "../hooks/useRetentionDays";
 import { plural, useSelection } from "../hooks/useSelection";
 import { SelectAll, SelectOne, SelectionBar } from "./Selection";
 
@@ -19,7 +20,10 @@ export default function SummaryOfExpenses({
   onRequestDelete,
   onBulkArchive,
   onBulkRequest,
+  onViewPo,
+  onEditPo,
 }) {
+  const keepFor = daysLabel(useRetentionDays());
   const [sort, setSort] = useState({ key: "date", dir: "desc" });
   const [toDelete, setToDelete] = useState(null);
   const [reason, setReason] = useState("");
@@ -66,8 +70,12 @@ export default function SummaryOfExpenses({
     }
   }
 
+  // The search bar narrows this project's entries by payee / particulars or CV no. (Opening a
+  // project clears it, so the text that found the project doesn't hide its entries.)
+  const entryQuery = q.trim().toLowerCase();
+
   const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    const needle = entryQuery;
     const list = summary.entries.filter(
       (e) =>
         !needle || e.payee.toLowerCase().includes(needle) || e.cv_no.toLowerCase().includes(needle)
@@ -77,7 +85,7 @@ export default function SummaryOfExpenses({
       if (sort.key === "amount") return (cents(a.amount) - cents(b.amount)) * mul;
       return (a.date.localeCompare(b.date) || a.id - b.id) * mul;
     });
-  }, [summary, q, sort]);
+  }, [summary, entryQuery, sort]);
 
   const shownTotal = rows.reduce((s, e) => s + cents(e.amount), 0) / 100;
   const filtered = rows.length !== summary.entries.length;
@@ -88,7 +96,7 @@ export default function SummaryOfExpenses({
     sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
   const arrow = (key) => (sort.key === key ? (sort.dir === "asc" ? " ↑" : " ↓") : "");
 
-  const pg = usePagination(rows, 10, q);
+  const pg = usePagination(rows, 10, entryQuery);
 
   return (
     <>
@@ -99,6 +107,32 @@ export default function SummaryOfExpenses({
           </button>
           <h1>Summary of Expenses</h1>
           <p className="project-name">{summary.project_title}</p>
+          <div className="po-info">
+            {summary.po_number ? (
+              <>
+                <span>
+                  PO <strong>{summary.po_number}</strong>
+                </span>
+                {summary.po_amount != null && (
+                  <span>
+                    PO amount <strong>{money(summary.po_amount)}</strong>
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="po-missing">This project has no purchase order yet.</span>
+            )}
+            {summary.has_po_file && onViewPo && (
+              <button type="button" className="pill sm" onClick={() => onViewPo(summary)}>
+                View PO (PDF)
+              </button>
+            )}
+            {isAdmin && onEditPo && summary.project_id != null && (
+              <button type="button" className="pill sm" onClick={() => onEditPo(summary)}>
+                {summary.po_number ? "Edit PO" : "Add PO"}
+              </button>
+            )}
+          </div>
         </div>
         <div className="head-actions">
           <button
@@ -189,8 +223,8 @@ export default function SummaryOfExpenses({
                 <td className="select-cell">
                   <SelectOne id={e.id} selection={selection} label={`Select CV# ${e.cv_no}`} />
                 </td>
-                <td>{fmtDate(e.date)}</td>
-                <td className="wrap">{e.cv_no}</td>
+                <td className="nowrap">{fmtDate(e.date)}</td>
+                <td className="nowrap">{e.cv_no}</td>
                 <td className="wrap">{e.payee}</td>
                 <td className="amount">{money(e.amount)}</td>
                 <td className="small">
@@ -252,7 +286,7 @@ export default function SummaryOfExpenses({
         >
           <p>
             {isAdmin
-              ? "They'll be removed from this project and its totals. An admin can restore them from Activity Log → Archived within 30 days; after that they're deleted permanently."
+              ? `They'll be removed from this project and its totals. An admin can restore them from Activity Log → Archived within ${keepFor}; after that they're deleted permanently.`
               : "An admin will review a request for each entry. Entries that already have a pending request are skipped."}
           </p>
           <label>
@@ -280,7 +314,7 @@ export default function SummaryOfExpenses({
         >
           <p>
             Archive CV# <strong>{toDelete.cv_no}</strong> ({toDelete.payee})? It will be removed from
-            this project and its totals. An admin can restore it from Activity Log → Archived within 30 days;
+            this project and its totals. An admin can restore it from Activity Log → Archived within {keepFor};
             after that it's deleted permanently.
           </p>
         </ConfirmDialog>

@@ -9,7 +9,7 @@ const splitCells = (line) => {
   if (t.endsWith("|")) t = t.slice(0, -1);
   return t.split("|").map((c) => c.trim());
 };
-const isNumber = (s) => /^[-(]?\s*(₱|PHP)?\s*[\d,]+(\.\d+)?\)?$/.test(s.trim());
+const isNumber = (s) => /^[-(]?\s*(₱|\$|€|¥|£|S\$|HK\$|A\$|[A-Z]{3})?\s*[\d,]+(\.\d+)?\)?$/.test(s.trim());
 
 function Inline({ text }) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);

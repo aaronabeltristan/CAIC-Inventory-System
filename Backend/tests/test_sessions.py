@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 import models
 import sessions
-from tests.conftest import PASSWORD, login, logs, make_user
+from tests.conftest import PASSWORD, login, logs, make_user, set_setting
 
 PHONE = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) Chrome/130.0 Mobile Safari/537.36"}
 
@@ -170,7 +170,7 @@ def test_refresh_refused_after_session_was_replaced(client, staff):
 
 
 def test_exempt_accounts_can_sign_in_many_times(client, monkeypatch):
-    monkeypatch.setattr("security.SINGLE_SESSION_EXEMPT", {"loadtest"})
+    set_setting("single_session_exempt", "loadtest")
     make_user("loadtest")
     a, b = login(client, "loadtest"), login(client, "loadtest")
     assert client.get("/projects", headers=a).status_code == 200
@@ -244,7 +244,7 @@ def test_who_is_online_needs_sign_in(client):
 def test_exempt_account_shows_online_while_its_app_is_open(client, db, monkeypatch, admin):
     """Load-test accounts have no single session, but an open app still counts as online."""
     import live
-    monkeypatch.setattr("security.SINGLE_SESSION_EXEMPT", {"loadtest"})
+    set_setting("single_session_exempt", "loadtest")
     uid = make_user("loadtest")
     login(client, "loadtest")
     assert status_of(client, admin, "loadtest")["presence"] == "offline"  # app not open yet

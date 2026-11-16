@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtDate, money } from "../utils/format";
 
+// Every row names its project's purchase order (po_number, po_amount). The rows of one project
+// must agree; it's enough to fill them on one row of each project.
 const TEMPLATE =
-  "project_title,date,cv_no,payee,amount\n" +
-  "Plant 1 Roof Replacement,2026-10-01,CV-26-0001,Calamba Concrete Products Inc.,125000.00\n";
+  "project_title,po_number,po_amount,date,cv_no,payee,amount\n" +
+  "Plant 1 Roof Replacement,20260001,850000.00,2026-10-01,260001,Calamba Concrete Products Inc.,125000.00\n" +
+  "Plant 1 Roof Replacement,20260001,850000.00,2026-10-08,260002,Laguna Steel & Metal Supply Corp.,64250.50\n" +
+  "Warehouse B Fire Exit,20260002,240000.00,2026-10-12,260003,SafeGuard Fire Equipment Trading,38900.00\n";
 
 function downloadTemplate() {
   const url = URL.createObjectURL(new Blob([TEMPLATE], { type: "text/csv;charset=utf-8" }));
@@ -62,8 +66,11 @@ export default function ImportDialog({ api, onClose, onImported }) {
       <h2>Import file</h2>
       <div className="log-body">
         <p className="muted small">
-          Upload a CSV with the columns <code>project_title, date, cv_no, payee, amount</code>. Dates as YYYY-MM-DD
-          (MM/DD/YYYY also works); amounts as plain numbers. New project titles are created automatically.{" "}
+          Upload a CSV with the columns{" "}
+          <code>project_title, po_number, po_amount, date, cv_no, payee, amount</code>. Dates as YYYY-MM-DD
+          (MM/DD/YYYY also works); amounts as plain numbers; po_number and cv_no numbers only. Every row of a project names the same PO; a new project
+          needs its PO number and PO amount, and a PO number can belong to only one project. New projects are created
+          with their PO; attach each PO file (PDF) afterwards with <strong>Edit PO</strong>.{" "}
           <button type="button" className="link" onClick={downloadTemplate}>Download a template</button>
         </p>
 
@@ -90,6 +97,12 @@ export default function ImportDialog({ api, onClose, onImported }) {
                   created.{" "}
                 </>
               )}
+              {r.pos_added > 0 && (
+                <>
+                  <strong>{r.pos_added}</strong> existing project{r.pos_added === 1 ? "" : "s"} without a PO will get
+                  one from the file.{" "}
+                </>
+              )}
               {r.existing_projects > 0 && (
                 <>
                   <strong>{r.existing_projects}</strong> existing project{r.existing_projects === 1 ? "" : "s"} will get
@@ -106,7 +119,24 @@ export default function ImportDialog({ api, onClose, onImported }) {
             {r.new_projects.length > 0 && (
               <details className="import-details">
                 <summary>New projects ({r.new_projects.length})</summary>
-                <ul>{r.new_projects.map((t) => <li key={t}>{t}</li>)}</ul>
+                <ul>
+                  {(r.new_project_details?.length ? r.new_project_details : r.new_projects.map((title) => ({ title }))).map(
+                    (p) => (
+                      <li key={p.title}>
+                        {p.title}
+                        {p.po_number && (
+                          <span className="muted">
+                            {" "}
+                            · PO {p.po_number} · {money(p.po_amount)}
+                          </span>
+                        )}
+                      </li>
+                    )
+                  )}
+                </ul>
+                <p className="muted small">
+                  Their PO files (PDF) aren't in the CSV: add each one afterwards with Edit PO in Voucher Control.
+                </p>
               </details>
             )}
 

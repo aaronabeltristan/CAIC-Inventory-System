@@ -1,7 +1,8 @@
-"""Activity Log, archiving (soft delete) and the 30-day purge.
+"""Activity Log, archiving (soft delete) and the automatic purge.
 
 - Archiving hides an entry or a whole project (with its entries) from lists and totals.
-- Archived items can be restored for RETENTION_DAYS days, then they are deleted permanently.
+- Archived items can be restored for the retention period (get_retention_days: set by admins
+  in Settings, RETENTION_DAYS by default), then they are deleted permanently.
 - Every action, including the purge, is written to the Activity Log, which is kept.
 """
 from datetime import date, datetime, timedelta, timezone
@@ -12,13 +13,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+import app_settings
 import database
 import models
 import security
 
 router = APIRouter(tags=["Activity Log"])
 
-RETENTION_DAYS = 30
+RETENTION_DAYS = app_settings.BY_KEY["archive_retention_days"].default  # until an admin changes it
+
+
+def get_retention_days(db: Optional[Session] = None) -> int:
+    """How many days archived items can be restored before they're deleted permanently."""
+    return app_settings.get("archive_retention_days")
 
 
 # ==========================================
@@ -88,12 +95,12 @@ def diff(before: dict, after: dict) -> dict:
 
 def describe(d: models.Disbursement) -> str:
     project = d.project.title if d.project else "?"
-    return f"CV# {d.cv_no} ({d.payee}, PHP {d.amount:,.2f}) in {project}"
+    return f"CV# {d.cv_no} ({d.payee}, {app_settings.money(d.amount)}) in {project}"
 
 
-def deletes_at(archived_at: Optional[datetime]) -> Optional[datetime]:
-    """When an archived item will be deleted permanently."""
-    return archived_at + timedelta(days=RETENTION_DAYS) if archived_at else None
+def deletes_at(archived_at: Optional[datetime], days: int = RETENTION_DAYS) -> Optional[datetime]:
+    """When an archived item will be deleted permanently (`days` = get_retention_days)."""
+    return archived_at + timedelta(days=days) if archived_at else None
 
 
 def log(
@@ -162,7 +169,7 @@ def archive_project(db: Session, project: models.Project, user: models.User) -> 
                 {"request_id": req.id, "requested_by": req.requested_by, "note": req.review_note})
 
     log(db, user.username, "project_archive",
-        f"Archived project '{project.title}' with {len(active)} entr{'y' if len(active) == 1 else 'ies'} (PHP {total:,.2f})",
+        f"Archived project '{project.title}' with {len(active)} entr{'y' if len(active) == 1 else 'ies'} ({app_settings.money(total)})",
         "project", project.id,
         {"title": project.title, "entries": len(active), "total": plain(total)})
 
@@ -181,7 +188,8 @@ def delete_project_permanently(db: Session, p: models.Project, actor: str, actio
     log(db, actor, action,
         f"Permanently deleted project '{p.title}' and its {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} ({why})",
         "project", p.id,
-        {"title": p.title, "archived_by": p.archived_by, "archived_at": plain(p.archived_at),
+        {"title": p.title, "po_number": p.po_number, "po_amount": plain(p.po_amount),
+         "archived_by": p.archived_by, "archived_at": plain(p.archived_at),
          "entries": [snapshot(d) for d in entries]})
     for d in entries:
         db.delete(d)
@@ -218,9 +226,10 @@ def restore_project_items(db: Session, p: models.Project, user: models.User) -> 
 
 
 def purge_expired(db: Session) -> int:
-    """Permanently deletes everything archived more than RETENTION_DAYS ago.
+    """Permanently deletes everything archived longer ago than the retention period.
     Each deletion is logged with a copy of what was removed. Returns how many rows went."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
+    days = get_retention_days(db)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     removed = 0
 
     projects = (
@@ -229,7 +238,7 @@ def purge_expired(db: Session) -> int:
         .all()
     )
     for p in projects:
-        removed += delete_project_permanently(db, p, "system", "purge", f"{RETENTION_DAYS} days after archiving")
+        removed += delete_project_permanently(db, p, "system", "purge", f"{days} day{'' if days == 1 else 's'} after archiving")
     db.flush()
 
     entries = (
@@ -238,9 +247,31 @@ def purge_expired(db: Session) -> int:
         .all()
     )
     for d in entries:
-        delete_entry_permanently(db, d, "system", "purge", f"{RETENTION_DAYS} days after archiving")
+        delete_entry_permanently(db, d, "system", "purge", f"{days} day{'' if days == 1 else 's'} after archiving")
         removed += 1
 
+    db.commit()
+    return removed
+
+
+# Routine rows that "Delete routine Activity Log rows after" removes. Changes to records,
+# requests, accounts and settings are always kept.
+ROUTINE_ACTIONS = ("login", "logout", "login_failed", "login_challenge", "login_challenge_allowed",
+                   "login_challenge_denied", "login_challenge_cancelled", "chat", "export",
+                   "backup_requested")
+
+
+def purge_routine_logs(db: Session) -> int:
+    """Deletes routine Activity Log rows older than the setting (0 = keep everything)."""
+    days = app_settings.get("activity_log_keep_days")
+    if not days:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    removed = (
+        db.query(models.ActivityLog)
+        .filter(models.ActivityLog.action.in_(ROUTINE_ACTIONS), models.ActivityLog.created_at < cutoff)
+        .delete(synchronize_session=False)
+    )
     db.commit()
     return removed
 
@@ -370,6 +401,7 @@ def list_archived(
 ):
     """Entries archived on their own. Entries archived with their project are listed
     under that project and come back when it is restored."""
+    days = get_retention_days(db)
     rows = (
         db.query(models.Disbursement)
         .join(models.Project)
@@ -388,7 +420,7 @@ def list_archived(
             "created_by": d.created_by,
             "archived_by": d.archived_by,
             "archived_at": d.archived_at,
-            "deletes_at": deletes_at(d.archived_at),
+            "deletes_at": deletes_at(d.archived_at, days),
         }
         for d in rows
     ]
@@ -418,6 +450,7 @@ def list_archived_projects(
     current_user: models.User = Depends(security.get_current_superuser),
 ):
     """Archived projects, most recently archived first."""
+    days = get_retention_days(db)
     rows = (
         db.query(models.Project)
         .filter(models.Project.is_archived.is_(True))
@@ -434,7 +467,7 @@ def list_archived_projects(
             "total_amount": sum((d.amount for d in with_it), Decimal("0")),
             "archived_by": p.archived_by,
             "archived_at": p.archived_at,
-            "deletes_at": deletes_at(p.archived_at),
+            "deletes_at": deletes_at(p.archived_at, days),
         })
     return result
 

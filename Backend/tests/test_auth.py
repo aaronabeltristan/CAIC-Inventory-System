@@ -4,7 +4,7 @@ import pytest
 
 import models
 import security
-from tests.conftest import PASSWORD, login, logs, make_user
+from tests.conftest import PASSWORD, login, logs, make_user, set_setting
 
 
 def register(client, username="newbie", name="New Person", password="Long-enough-1", ip="203.0.113.5"):
@@ -83,7 +83,7 @@ def test_register_tidies_spaces_in_name(client):
 
 
 def test_register_is_rate_limited_per_address(client, monkeypatch):
-    monkeypatch.setattr("auth.REGISTER_PER_IP", 3)
+    set_setting("register_per_ip_per_hour", 3)
     for i in range(3):
         assert register(client, username=f"user{i}").status_code == 201
     assert register(client, username="user9").status_code == 429
@@ -91,14 +91,14 @@ def test_register_is_rate_limited_per_address(client, monkeypatch):
 
 
 def test_register_has_an_overall_cap_whatever_the_address(client, monkeypatch):
-    monkeypatch.setattr("auth.REGISTER_TOTAL", 3)
+    set_setting("register_total_per_hour", 3)
     for i in range(3):
         assert register(client, username=f"user{i}", ip=f"198.51.100.{i + 1}").status_code == 201
     assert register(client, username="user9", ip="198.51.100.99").status_code == 429
 
 
 def test_register_stops_when_too_many_are_waiting(client, monkeypatch):
-    monkeypatch.setattr("auth.MAX_WAITING_ACCOUNTS", 2)
+    set_setting("max_waiting_accounts", 2)
     register(client, username="wait1")
     register(client, username="wait2")
     assert register(client, username="wait3").status_code == 429

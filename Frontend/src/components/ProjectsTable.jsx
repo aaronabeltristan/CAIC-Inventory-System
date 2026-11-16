@@ -3,13 +3,17 @@ import { cents, money } from "../utils/format";
 import ConfirmDialog from "./ConfirmDialog";
 import { usePagination } from "../hooks/usePagination";
 import Pagination from "./Pagination";
+import { daysLabel, useRetentionDays } from "../hooks/useRetentionDays";
 import { plural, useSelection } from "../hooks/useSelection";
 import { SelectAll, SelectOne, SelectionBar } from "./Selection";
 
 const COLUMNS = [
   { key: "project_title", label: "PROJECT TITLE" },
+  { key: "po_number", label: "PO NUMBER" },
+  { key: "po_amount", label: "PO AMOUNT" },
   { key: "total", label: "TOTAL DISBURSEMENT AMOUNT" },
 ];
+const TEXT_SORT = new Set(["project_title", "po_number"]);
 
 
 function groupByProject(entries, projects = []) {
@@ -21,6 +25,9 @@ function groupByProject(entries, projects = []) {
       id: p.id,
       entry_count: p.entry_count ?? 0,
       project_title: p.title,
+      po_number: p.po_number || "",
+      po_amount: p.po_amount,
+      has_po_file: !!p.has_po_file,
       total: 0,
       payees: [],
       cvs: [],
@@ -31,7 +38,7 @@ function groupByProject(entries, projects = []) {
     const key = e.project_title.trim().toLowerCase();
     let p = map.get(key);
     if (!p) {
-      p = { project_title: e.project_title, total: 0, payees: [], cvs: [] };
+      p = { project_title: e.project_title, po_number: "", total: 0, payees: [], cvs: [] };
       map.set(key, p);
     }
     p.total += cents(e.amount);
@@ -53,7 +60,10 @@ export default function VoucherControl({
   onArchiveProject,
   onBulkArchiveProjects,
   onImport,
+  onViewPo,
+  onEditPo,
 }) {
+  const keepFor = daysLabel(useRetentionDays());
   const [sort, setSort] = useState({ key: "project_title", dir: "asc" });
   const [toDelete, setToDelete] = useState(null);
   // Admins: ticked projects, to archive several at once (by project id)
@@ -83,14 +93,16 @@ export default function VoucherControl({
           (p) =>
             (keys.includes("project_title") && p.project_title.toLowerCase().includes(needle)) ||
             (keys.includes("payee") && p.payees.some((x) => x.includes(needle))) ||
-            (keys.includes("cv_no") && p.cvs.some((x) => x.includes(needle)))
+            (keys.includes("cv_no") && p.cvs.some((x) => x.includes(needle))) ||
+            (keys.includes("po_number") && p.po_number.toLowerCase().includes(needle))
         )
       : grouped;
     const mul = sort.dir === "asc" ? 1 : -1;
+    const value = (p) => (sort.key === "po_amount" ? cents(p.po_amount ?? -1) : p.total);
     return [...list].sort((a, b) =>
-      sort.key === "project_title"
-        ? a.project_title.localeCompare(b.project_title, undefined, { numeric: true }) * mul
-        : (a.total - b.total) * mul
+      TEXT_SORT.has(sort.key)
+        ? (a[sort.key] || "").localeCompare(b[sort.key] || "", undefined, { numeric: true }) * mul
+        : (value(a) - value(b)) * mul
     );
   }, [grouped, q, fields, sort]);
 
@@ -98,7 +110,7 @@ export default function VoucherControl({
     setSort((s) =>
       s.key === key
         ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: key === "project_title" ? "asc" : "desc" }
+        : { key, dir: TEXT_SORT.has(key) ? "asc" : "desc" }
     );
   const ariaSort = (key) =>
     sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
@@ -165,6 +177,9 @@ export default function VoucherControl({
                   </button>
                 </th>
               ))}
+              <th scope="col" className="col-po_file">
+                <span className="th-label">PO FILE</span>
+              </th>
               <th scope="col" className="col-actions">
                 <span className="th-label">ACTIONS</span>
               </th>
@@ -181,11 +196,45 @@ export default function VoucherControl({
                   </td>
                 )}
                 <td>{p.project_title}</td>
+                <td className="nowrap">{p.po_number || <span className="muted">None</span>}</td>
+                <td className="amount">{p.po_amount != null ? money(p.po_amount) : <span className="muted">—</span>}</td>
                 <td className="amount">{money(p.total / 100)}</td>
+                <td className="po-file-cell">
+                  {p.has_po_file ? (
+                    <button
+                      type="button"
+                      className="pill sm"
+                      onClick={() => onViewPo(p)}
+                      title={`Open the PO of ${p.project_title} (PDF) in a new tab`}
+                    >
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                        <path
+                          d="M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      View PDF
+                    </button>
+                  ) : (
+                    <span className="muted">No file</span>
+                  )}
+                </td>
                 <td className="actions">
                   <button className="pill sm view" onClick={() => onView(p)}>
                     View
                   </button>
+                  {isAdmin && p.id != null && (
+                    <button
+                      className="pill sm"
+                      onClick={() => onEditPo(p)}
+                      title={p.po_number ? "Change the PO number, amount or file" : "This project has no PO yet"}
+                    >
+                      {p.po_number ? "Edit PO" : "Add PO"}
+                    </button>
+                  )}
                   {isAdmin && p.id != null && (
                     <button className="pill sm danger" onClick={() => setToDelete(p)}>
                       Archive
@@ -209,7 +258,13 @@ export default function VoucherControl({
           <p className="panel-msg">No projects yet. Use Create new record or Import File.</p>
         )}
         {!loading && grouped.length > 0 && rows.length === 0 && (
-          <p className="panel-msg">No projects match “{q}”.</p>
+          <p className="panel-msg">
+            {fields[0] === "po_number"
+              ? `No PO number matches “${q}”.`
+              : fields[0] === "payee"
+                ? `No project has a payee matching “${q}”.`
+                : `No project title matches “${q}”.`}
+          </p>
         )}
       </section>
       {bulkOpen && (
@@ -223,7 +278,7 @@ export default function VoucherControl({
           <p>
             Each project is archived together with all its entries (
             {chosen.reduce((n, p) => n + (p.entry_count || 0), 0)} in total). Pending requests on those entries are
-            closed. They can be restored from Activity Log → Archived within 30 days; after that they're deleted
+            closed. They can be restored from Activity Log → Archived within {keepFor}; after that they're deleted
             permanently.
           </p>
           <ul className="bulk-list">
@@ -251,7 +306,7 @@ export default function VoucherControl({
             ? It will be hidden from Voucher Control and totals.
           </p>
           <p>
-            An admin can restore it from Activity Log → Archived within <strong>30 days</strong>. After that it's
+            An admin can restore it from Activity Log → Archived within <strong>{keepFor}</strong>. After that it's
             deleted permanently.
           </p>
         </ConfirmDialog>

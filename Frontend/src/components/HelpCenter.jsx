@@ -1,5 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { CATEGORIES, GUIDES } from "../help/guides";
+import { daysLabel, useRetentionDays } from "../hooks/useRetentionDays";
+
+// "{retention}" in a guide -> the period archived items are kept, e.g. "30 days"
+const fill = (text, days) => text.replaceAll("{retention}", days);
 
 // "**Edit**" in a step -> <strong>Edit</strong>; "*text*" -> <em>text</em>
 function Rich({ text }) {
@@ -126,7 +130,18 @@ export default function HelpCenter({ user, onGo }) {
   const [open, setOpen] = useState(null);
   const { done, toggle, reset } = useDone(user.username);
 
-  const mine = useMemo(() => GUIDES.filter((g) => forRole(g, isAdmin)), [isAdmin]);
+  const retention = daysLabel(useRetentionDays());
+  const mine = useMemo(
+    () =>
+      GUIDES.filter((g) => forRole(g, isAdmin)).map((g) => ({
+        ...g,
+        title: fill(g.title, retention),
+        summary: fill(g.summary, retention),
+        steps: g.steps.map((t) => fill(t, retention)),
+        ...(g.tips ? { tips: g.tips.map((t) => fill(t, retention)) } : {}),
+      })),
+    [isAdmin, retention]
+  );
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return mine.filter(

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 import activity
+import app_settings
 import database
 import models
 import security
@@ -91,6 +92,9 @@ RESET_TOTAL = int(os.getenv("RESET_TOTAL_PER_HOUR", "60"))
 def request_password_reset(payload: ResetRequestCreate, request: Request, db: Session = Depends(database.get_db)):
     """No sign-in needed. Always gives the same answer, so it can't be used to find out
     which usernames exist. Limited per address and overall, since anyone can call it."""
+    if not app_settings.get("allow_password_reset"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Password reset requests are turned off. Ask an admin to reset your password.")
     ip = security.client_ip(request)
     if security.rate_limited(db, "reset_request", ip, per_ip=RESET_PER_IP, total=RESET_TOTAL, minutes=60):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,

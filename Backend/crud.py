@@ -71,15 +71,20 @@ def get_all_projects(db: Session) -> List[dict]:
             models.Project.title,
             func.coalesce(func.sum(active_amount), 0).label("total_amount"),
             func.count(models.Disbursement.id).label("entry_count"),  # archived entries included
+            models.Project.po_number,
+            models.Project.po_amount,
+            func.count(models.ProjectPoFile.project_id).label("po_files"),
         )
         .outerjoin(models.Disbursement, models.Disbursement.project_id == models.Project.id)
+        .outerjoin(models.ProjectPoFile, models.ProjectPoFile.project_id == models.Project.id)
         .filter(models.Project.is_archived.is_(False))
-        .group_by(models.Project.id, models.Project.title)
+        .group_by(models.Project.id, models.Project.title, models.Project.po_number, models.Project.po_amount)
         .order_by(models.Project.title)
         .all()
     )
     return [
-        {"id": r.id, "title": r.title, "total_amount": r.total_amount, "entry_count": r.entry_count}
+        {"id": r.id, "title": r.title, "total_amount": r.total_amount, "entry_count": r.entry_count,
+         "po_number": r.po_number, "po_amount": r.po_amount, "has_po_file": r.po_files > 0}
         for r in rows
     ]
 
@@ -146,25 +151,22 @@ def get_project_by_title(db: Session, title: str) -> Optional[models.Project]:
     return db.query(models.Project).filter(models.Project.title == title).first()
 
 
-def create_project(db: Session, project_in: schemas.ProjectCreate) -> models.Project:
-    """Creates a new standalone project record."""
-    db_project = models.Project(title=project_in.title)
-    db.add(db_project)
-    db.commit()
-    db.refresh(db_project)
-    return db_project
-
-
 def get_project_summary(db: Session, project_title: str) -> Optional[dict]:
     """Retrieves project details with its active (not archived) entries."""
     project = get_project_by_title(db, title=project_title)
     if not project or project.is_archived:
         return None
 
+    has_file = db.query(models.ProjectPoFile.project_id).filter(
+        models.ProjectPoFile.project_id == project.id).first() is not None
     return {
+        "project_id": project.id,
         "project_title": project.title,
         "entries": with_person_names(db, list(project.active_disbursements)),
         "total_amount": project.total_amount,
+        "po_number": project.po_number,
+        "po_amount": project.po_amount,
+        "has_po_file": has_file,
     }
 
 

@@ -219,7 +219,7 @@ button { cursor: pointer; }
 .vtable tbody td { height: 61px; font-size: 1.1rem; }
 .vtable td.actions, .vtable th.col-actions { text-align: left; white-space: nowrap; }
 .vtable td.actions .pill { margin-left: 0.6rem; }
-.vtable td.amount { font-variant-numeric: tabular-nums; }
+.vtable td.amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vtable td.small { font-size: 0.85rem; }
 .vtable tfoot th { text-align: right; }
 .vtable tfoot th, .vtable tfoot td { font-weight: 700; font-size: 1.1rem; }
@@ -881,3 +881,36 @@ button { cursor: pointer; }
   .head-actions .pill { flex: 1 1 100%; }
   .stat-cards { grid-template-columns: 1fr; }
 }
+
+/* ---------- Settings page ---------- */
+.settings-form { max-width: 46rem; }
+.settings-section { border: 0; padding: 0; margin: 0 0 1.6rem; }
+.settings-section legend { font-weight: 700; font-size: 1.05rem; margin-bottom: 0.7rem; padding: 0; }
+.setting-row { margin-bottom: 1rem; }
+.setting-row > label { display: block; font-size: 0.95rem; margin-bottom: 0.3rem; }
+.setting-row input.setting-number,
+.setting-row input.setting-text,
+.setting-row select {
+  display: block; padding: 0.55rem 0.75rem; font: inherit;
+  border: 1.5px solid var(--line); border-radius: 10px; background: #fff;
+}
+.setting-row input.setting-number { width: 9rem; }
+.setting-row input.setting-text { width: min(100%, 28rem); }
+.setting-toggle > label { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; }
+.setting-toggle input[type="checkbox"] { width: 1.15rem; height: 1.15rem; accent-color: #1a1a1a; }
+.settings-form .error { margin-top: 0.4rem; }
+.settings-actions { display: flex; gap: 0.6rem; margin-top: 0.5rem; position: sticky; bottom: 0.5rem; }
+.backup-now { margin-top: 0.4rem; }
+.backup-now .backup-status { margin-bottom: 0.7rem; }
+.logo-setting { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+.logo-preview { width: 11rem; min-height: 4rem; display: grid; place-items: center; padding: 0.6rem;
+  border: 1.5px dashed var(--line); border-radius: 12px; background: #fff; }
+.logo-preview img { max-width: 100%; max-height: 5rem; object-fit: contain; }
+
+/* ---------- Purchase orders (Voucher Control, Summary of Expenses) ---------- */
+.vtable td.nowrap { white-space: nowrap; }
+.vtable td.po-file-cell { white-space: nowrap; }
+.vtable td.po-file-cell .pill { display: inline-flex; align-items: center; gap: 0.35rem; }
+.po-info { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1.2rem; margin-top: 0.35rem; font-size: 0.95rem; }
+.po-info .pill { display: inline-flex; align-items: center; gap: 0.35rem; }
+.po-missing { color: #b45309; }

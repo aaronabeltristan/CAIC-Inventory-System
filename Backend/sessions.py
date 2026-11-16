@@ -13,8 +13,8 @@ straight away. Instead:
    CHALLENGE_SECONDS the attempt ends and it can try again.
 
 Signing out ends the session, so signing in elsewhere afterwards needs no approval.
-Usernames in SINGLE_SESSION_EXEMPT (e.g. load-test accounts) can be signed in many times."""
-import os
+Accounts listed in Settings → Security (e.g. load-test accounts) can be signed in many times,
+and the rule can be turned off there."""
 import re
 import secrets
 import time
@@ -27,6 +27,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 import activity
+import app_settings
 import database
 import models
 import security
@@ -39,9 +40,9 @@ CHALLENGE_SECONDS = 180      # how long a new device waits for an answer
 CHALLENGE_LIMIT = 3         # at most this many sign-in attempts from other devices...
 CHALLENGE_LIMIT_MINUTES = 5  # ...per account in this many minutes
 ABANDONED_SECONDS = 12       # the new device checks every 2 s; silent this long = it gave up (tab closed)
-# A sign-in lasts this long without activity. While the person is using the app, the app
-# renews it in the background (POST /auth/refresh), so only idle sessions expire.
-TOKEN_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "30"))
+# A sign-in lasts session_idle_minutes (Settings → Security) without activity. While the person
+# is using the app, the app renews it in the background (POST /auth/refresh), so only idle
+# sessions expire.
 # The app renews the sign-in about every 5 minutes while someone is using it (clicks, typing,
 # scrolling), which updates last_active_at. Nothing for longer than this while the app is open = Idle.
 IDLE_AFTER_SECONDS = 7 * 60
@@ -103,7 +104,7 @@ def issue_token(user: models.User, sid: Optional[str]) -> str:
     }
     if sid:
         data["sid"] = sid
-    return security.create_access_token(data=data, expires_delta=timedelta(minutes=TOKEN_MINUTES))
+    return security.create_access_token(data=data, expires_delta=timedelta(minutes=app_settings.get("session_idle_minutes")))
 
 
 def touch(db: Session, user_id: int, sid: Optional[str]) -> None:

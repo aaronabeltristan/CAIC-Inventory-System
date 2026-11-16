@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useModal } from "../hooks/useModal";
-import { cents, fmtStamp, todayISO } from "../utils/format";
+import { cents, currency, fmtStamp, todayISO } from "../utils/format";
+import { useAppSettings } from "../hooks/useAppSettings";
 
 export default function EntryDialog({ mode, entry, defaultProject, user, onSave, onClose }) {
   const [ref, dialogProps] = useModal(onClose);
@@ -18,13 +19,18 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");
-  // Normal users can't edit directly: their changes go to an admin for approval
-  const asRequest = mode === "edit" && !user.is_superuser;
+  // Staff edits go through an edit request. It waits for an admin's approval unless Settings →
+  // Requests says staff edits don't need approval (then it's applied straight away).
+  const { staff_edits_need_approval: needsApproval, edit_reason_required: reasonRequired } = useAppSettings();
+  const staffEdit = mode === "edit" && !user.is_superuser;
+  const asRequest = staffEdit && needsApproval;
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   async function submit(e) {
     e.preventDefault();
     setError("");
+    const cvChanged = mode === "create" || form.cv_no.trim() !== entry.cv_no;
+    if (cvChanged && !/^\d{1,30}$/.test(form.cv_no.trim())) return setError("CV no. must be numbers only (0-9).");
     const amount = Number(form.amount);
     if (!(amount > 0)) return setError("Enter an amount greater than zero.");
 
@@ -55,6 +61,10 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
           return;
         }
         const why = reason.trim();
+        if (staffEdit && reasonRequired && why.length < 3) {
+          setBusy(false);
+          return setError("Give a reason for the change (at least 3 characters).");
+        }
         // The values this person saw for the fields they changed. The backend refuses the
         // save if someone else changed any of them in the meantime.
         const original = Object.fromEntries(Object.keys(changes).map((k) => [k, entry[k]]));
@@ -62,7 +72,7 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
           ...changes,
           original,
           editor_name: user.name,
-          ...(asRequest && why ? { reason: why } : {}),
+          ...(staffEdit && why ? { reason: why } : {}),
         });
       }
     } catch (err) {
@@ -84,7 +94,16 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
           </label>
           <label>
             CV no.
-            <input value={form.cv_no} onChange={set("cv_no")} required />
+            <input
+              value={form.cv_no}
+              onChange={(e) => setForm((f) => ({ ...f, cv_no: e.target.value.replace(/\D/g, "") }))}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={30}
+              title="Numbers only (0-9)"
+              placeholder="e.g. 260001"
+              required
+            />
           </label>
         </div>
         <label>
@@ -92,7 +111,7 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
           <input value={form.payee} onChange={set("payee")} required />
         </label>
         <label>
-          Amount (PHP)
+          Amount ({currency()})
           <input
             type="number"
             inputMode="decimal"
@@ -104,14 +123,15 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
           />
         </label>
 
-        {asRequest && (
+        {staffEdit && (
           <label>
-            Reason (optional)
+            {reasonRequired ? "Reason" : "Reason (optional)"}
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={2}
               maxLength={500}
+              required={reasonRequired}
               placeholder="e.g. Wrong amount encoded"
             />
           </label>

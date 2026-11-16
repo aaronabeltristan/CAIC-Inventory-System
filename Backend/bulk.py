@@ -1,4 +1,4 @@
-"""Working on several items at once, and deleting archived items before the 30 days are up.
+"""Working on several items at once, and deleting archived items before the retention period is up.
 
 - Archive several entries (admins), or ask for several to be archived (anyone, with a reason).
 - Archive several projects with their entries (admins).
@@ -98,7 +98,7 @@ def bulk_archive_entries(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(security.get_current_superuser),
 ):
-    """Admins: archives several entries. Each can be restored for 30 days, as usual."""
+    """Admins: archives several entries. Each can be restored for the retention period, as usual."""
     rows, skipped = _entries(db, payload.ids)
     reason = (payload.reason or "").strip() or None
     done = 0
@@ -198,7 +198,7 @@ def delete_selected(
     current_user: models.User = Depends(security.get_current_superuser),
 ):
     """Admins: permanently deletes the selected archived projects (with all their entries) and
-    entries, without waiting for the 30 days. Can't be undone; the Activity Log keeps a copy
+    entries, without waiting for the retention period. Can't be undone; the Activity Log keeps a copy
     of what was deleted. Only archived items can be deleted."""
     projects, skipped = _projects(db, payload.projects)
     entries, missing = _entries(db, payload.entries)

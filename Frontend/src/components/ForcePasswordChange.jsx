@@ -1,5 +1,5 @@
 import { useState } from "react";
-import logo from "../assets/logo.webp";
+import Logo from "./Logo";
 
 // Shown after signing in with a temporary password: the user must choose a new one first.
 export default function ForcePasswordChange({ api, user, onDone, onLogout }) {
@@ -28,7 +28,7 @@ export default function ForcePasswordChange({ api, user, onDone, onLogout }) {
   return (
     <main className="login">
       <header className="login-brand">
-        <img src={logo} alt="Calamba Allied Industrial Corporation" className="login-logo" />
+        <Logo className="login-logo" />
       </header>
       <form className="login-sheet" onSubmit={submit}>
         <div className="login-fields">

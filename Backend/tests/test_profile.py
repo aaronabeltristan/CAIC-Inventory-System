@@ -102,11 +102,11 @@ def test_new_name_shows_on_entries(client, admin, staff):
 # ---------- My Activity, security, stats ----------
 
 def test_my_activity_shows_only_my_things(client, staff, staff2):
-    add_entry(client, staff, cv_no="CV-1")
-    add_entry(client, staff2, cv_no="CV-2")
+    add_entry(client, staff, cv_no="100001")
+    add_entry(client, staff2, cv_no="100002")
     page = client.get("/me/activity", headers=staff.auth).json()
     text = str(page)
-    assert "CV-1" in text and "CV-2" not in text
+    assert "100001" in text and "100002" not in text
 
 
 def test_my_activity_can_hide_sign_ins(client, staff):
@@ -122,9 +122,9 @@ def test_my_security_counts_failed_sign_ins(client, staff):
 
 
 def test_my_stats(client, admin, staff):
-    add_entry(client, staff, cv_no="CV-1", amount="100.00", date="2026-01-05")
-    add_entry(client, staff, project="Other", cv_no="CV-2", amount="50.50")
-    e = add_entry(client, staff, cv_no="CV-3", amount="10.00")
+    add_entry(client, staff, cv_no="100001", amount="100.00", date="2026-01-05")
+    add_entry(client, staff, project="Other", cv_no="100002", amount="50.50")
+    e = add_entry(client, staff, cv_no="100003", amount="10.00")
     client.post(f"/disbursements/{e['id']}/deletion-request", headers=staff.auth, json={"reason": "dup"})
     stats = client.get("/me/stats", headers=staff.auth).json()
     assert stats["entries_total"] == 3

@@ -1,4 +1,4 @@
-"""Archiving, restoring, permanent delete, bulk actions and the 30-day clean-up."""
+"""Archiving, restoring, permanent delete, bulk actions and the automatic clean-up."""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -13,12 +13,12 @@ def project_id(client, who, title="Bamban Plant"):
 
 def test_archived_entry_leaves_lists_and_totals(client, admin, staff):
     e = add_entry(client, staff)
-    add_entry(client, staff, cv_no="CV-2", amount="100.00")
+    add_entry(client, staff, cv_no="100002", amount="100.00")
     assert client.delete(f"/disbursements/{e['id']}?reason=dup", headers=admin.auth).status_code == 204
-    assert [r["cv_no"] for r in client.get("/disbursements/", headers=staff.auth).json()] == ["CV-2"]
+    assert [r["cv_no"] for r in client.get("/disbursements/", headers=staff.auth).json()] == ["100002"]
     assert Decimal(client.get("/projects", headers=staff.auth).json()[0]["total_amount"]) == Decimal("100.00")
     archived = client.get("/disbursements/archived", headers=admin.auth).json()
-    assert [a["cv_no"] for a in archived] == ["CV-001"]
+    assert [a["cv_no"] for a in archived] == ["000001"]
 
 
 def test_archiving_twice_is_refused(client, admin, staff):
@@ -44,7 +44,7 @@ def test_restore_entry_brings_it_back(client, admin, staff):
 
 def test_archiving_project_archives_its_entries(client, admin, staff):
     add_entry(client, staff)
-    add_entry(client, staff, cv_no="CV-2")
+    add_entry(client, staff, cv_no="100002")
     pid = project_id(client, admin)
     assert client.delete(f"/projects/{pid}", headers=admin.auth).status_code == 204
     assert client.get("/projects", headers=staff.auth).json() == []
@@ -57,12 +57,12 @@ def test_archiving_project_archives_its_entries(client, admin, staff):
 
 def test_restoring_project_keeps_separately_archived_entries_archived(client, admin, staff):
     a = add_entry(client, staff)
-    add_entry(client, staff, cv_no="CV-2")
+    add_entry(client, staff, cv_no="100002")
     client.delete(f"/disbursements/{a['id']}", headers=admin.auth)  # archived on its own first
     pid = project_id(client, admin)
     client.delete(f"/projects/{pid}", headers=admin.auth)
     assert client.post(f"/projects/{pid}/restore", headers=admin.auth).status_code == 204
-    assert [r["cv_no"] for r in client.get("/disbursements/", headers=staff.auth).json()] == ["CV-2"]
+    assert [r["cv_no"] for r in client.get("/disbursements/", headers=staff.auth).json()] == ["100002"]
 
 
 def test_entry_of_archived_project_cannot_be_restored_alone(client, admin, staff):
@@ -74,8 +74,8 @@ def test_entry_of_archived_project_cannot_be_restored_alone(client, admin, staff
 # ---------- Bulk ----------
 
 def test_bulk_archive_reports_done_and_skipped(client, admin, staff):
-    a = add_entry(client, staff, cv_no="CV-1")
-    b = add_entry(client, staff, cv_no="CV-2")
+    a = add_entry(client, staff, cv_no="100001")
+    b = add_entry(client, staff, cv_no="100002")
     client.delete(f"/disbursements/{b['id']}", headers=admin.auth)
     r = client.post("/disbursements/bulk-archive", headers=admin.auth,
                     json={"ids": [a["id"], b["id"], 999, a["id"]], "reason": "cleanup"})
@@ -89,8 +89,8 @@ def test_bulk_archive_needs_ids(client, admin):
 
 
 def test_bulk_archive_request_by_staff(client, admin, staff):
-    a = add_entry(client, staff, cv_no="CV-1")
-    b = add_entry(client, staff, cv_no="CV-2")
+    a = add_entry(client, staff, cv_no="100001")
+    b = add_entry(client, staff, cv_no="100002")
     client.post(f"/disbursements/{b['id']}/deletion-request", headers=staff.auth, json={"reason": "dup"})
     r = client.post("/disbursements/bulk-archive-request", headers=staff.auth,
                     json={"ids": [a["id"], b["id"]], "reason": "duplicates"})
@@ -106,8 +106,8 @@ def test_bulk_archive_request_needs_reason(client, staff):
 
 
 def test_bulk_archive_and_restore_projects(client, admin, staff):
-    add_entry(client, staff, project="P1", cv_no="CV-1")
-    add_entry(client, staff, project="P2", cv_no="CV-2")
+    add_entry(client, staff, project="P1", cv_no="100001")
+    add_entry(client, staff, project="P2", cv_no="100002")
     ids = [p["id"] for p in client.get("/projects", headers=admin.auth).json()]
     assert client.post("/projects/bulk-archive", headers=admin.auth, json={"ids": ids}).json()["done"] == 2
     assert client.get("/projects", headers=staff.auth).json() == []
@@ -119,8 +119,8 @@ def test_bulk_archive_and_restore_projects(client, admin, staff):
 # ---------- Permanent delete ----------
 
 def test_permanent_delete_only_for_archived_items(client, db, admin, staff):
-    a = add_entry(client, staff, cv_no="CV-1")
-    b = add_entry(client, staff, cv_no="CV-2")
+    a = add_entry(client, staff, cv_no="100001")
+    b = add_entry(client, staff, cv_no="100002")
     client.delete(f"/disbursements/{a['id']}", headers=admin.auth)
     r = client.post("/archived/delete", headers=admin.auth, json={"entries": [a["id"], b["id"]]})
     assert r.json()["done"] == 1 and "isn't archived" in r.json()["skipped"][0]
@@ -129,7 +129,7 @@ def test_permanent_delete_only_for_archived_items(client, db, admin, staff):
     assert db.get(models.Disbursement, b["id"]) is not None
     # the Activity Log keeps a copy of what was deleted
     deleted = logs(db, "permanent_delete")
-    assert len(deleted) == 1 and "CV-1" in str(deleted[0].details)
+    assert len(deleted) == 1 and "100001" in str(deleted[0].details)
 
 
 def test_permanent_delete_of_project_removes_its_entries(client, db, admin, staff):
@@ -143,8 +143,8 @@ def test_permanent_delete_of_project_removes_its_entries(client, db, admin, staf
 
 
 def test_purge_removes_only_items_archived_over_30_days_ago(client, db, admin, staff):
-    old = add_entry(client, staff, cv_no="CV-OLD")
-    new = add_entry(client, staff, cv_no="CV-NEW")
+    old = add_entry(client, staff, cv_no="200003")
+    new = add_entry(client, staff, cv_no="200004")
     client.delete(f"/disbursements/{old['id']}", headers=admin.auth)
     client.delete(f"/disbursements/{new['id']}", headers=admin.auth)
     long_ago = datetime.now(timezone.utc) - timedelta(days=activity.RETENTION_DAYS + 1)
@@ -155,6 +155,44 @@ def test_purge_removes_only_items_archived_over_30_days_ago(client, db, admin, s
     db.expire_all()
     assert db.get(models.Disbursement, old["id"]) is None
     assert db.get(models.Disbursement, new["id"]) is not None
+
+
+def test_retention_setting_defaults_to_30_and_everyone_can_read_it(client, admin, staff):
+    r = client.get("/settings", headers=staff.auth)
+    assert r.status_code == 200 and r.json()["values"]["archive_retention_days"] == activity.RETENTION_DAYS == 30
+    assert "schema" not in r.json()                                   # descriptions are for admins
+    assert "login_max_failures" not in r.json()["values"]             # admin-only settings stay hidden
+
+
+def test_only_admins_can_change_retention_and_it_is_logged(client, db, admin, staff):
+    assert client.put("/settings", headers=staff.auth, json={"archive_retention_days": 7}).status_code == 403
+    for bad in (0, 366, "x", 7.5, True):
+        assert client.put("/settings", headers=admin.auth, json={"archive_retention_days": bad}).status_code == 422
+    r = client.put("/settings", headers=admin.auth, json={"archive_retention_days": 7})
+    assert r.status_code == 200 and r.json()["values"]["archive_retention_days"] == 7
+    assert client.get("/settings", headers=staff.auth).json()["values"]["archive_retention_days"] == 7
+    assert len(logs(db, "settings_update")) == 1
+
+
+def test_purge_and_deletes_at_follow_the_retention_setting(client, db, admin, staff):
+    e = add_entry(client, staff)
+    client.delete(f"/disbursements/{e['id']}", headers=admin.auth)
+    ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
+    db.query(models.Disbursement).filter_by(id=e["id"]).update({"archived_at": ten_days_ago})
+    db.commit()
+    assert activity.purge_expired(db) == 0                      # 30 days by default: kept
+
+    preview = client.get("/settings/retention-preview?archive_retention_days=7", headers=admin.auth).json()
+    assert preview["entries"] == 1 and preview["projects"] == 0
+    assert client.put("/settings", headers=admin.auth, json={"archive_retention_days": 14}).status_code == 200
+    archived = client.get("/disbursements/archived", headers=admin.auth).json()
+    assert archived[0]["deletes_at"].startswith((ten_days_ago + timedelta(days=14)).date().isoformat())
+
+    client.put("/settings", headers=admin.auth, json={"archive_retention_days": 7})
+    db.expire_all()
+    assert activity.purge_expired(db) == 1                      # now past the shorter period
+    db.expire_all()
+    assert db.get(models.Disbursement, e["id"]) is None
 
 
 def test_activity_log_is_admin_only_and_filterable(client, admin, staff):

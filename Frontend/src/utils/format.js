@@ -1,6 +1,18 @@
-const peso = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
+// The currency is set in Settings → Company (amounts themselves are never converted)
+const LOCALES = { PHP: "en-PH", USD: "en-US", EUR: "en-IE", JPY: "ja-JP", SGD: "en-SG", HKD: "en-HK", AUD: "en-AU", GBP: "en-GB" };
+const formatter = (code) =>
+  new Intl.NumberFormat(LOCALES[code] || "en-PH", { style: "currency", currency: LOCALES[code] ? code : "PHP" });
+let moneyFormat = formatter("PHP");
+let currencyCode = "PHP";
 
-export const money = (n) => peso.format(Number(n) || 0);
+export function setCurrency(code) {
+  if (!code || code === currencyCode) return;
+  currencyCode = code;
+  moneyFormat = formatter(code);
+}
+export const currency = () => currencyCode;
+
+export const money = (n) => moneyFormat.format(Number(n) || 0);
 export const cents = (n) => Math.round((Number(n) || 0) * 100);
 export const todayISO = () => new Date().toLocaleDateString("en-CA");
 

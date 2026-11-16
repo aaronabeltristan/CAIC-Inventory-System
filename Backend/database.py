@@ -107,6 +107,11 @@ def ensure_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE login_challenges ADD COLUMN IF NOT EXISTS polled_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE deletion_requests ALTER COLUMN requester_seen SET DEFAULT FALSE",
+        # Purchase orders: a PO number (unique, ignoring capitals), the PO amount and a PDF copy
+        # (table project_po_files). Projects made before this have none until an admin adds them.
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS po_number VARCHAR(60)",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS po_amount NUMERIC(14, 2)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_po_number ON projects (lower(po_number))",
     ]
     with engine.begin() as conn:
         for sql in statements:

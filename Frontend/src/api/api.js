@@ -17,6 +17,10 @@ export const ROUTES = {
 };
 const UPDATE_METHOD = "PATCH";
 
+// The company logo set in Settings, or null for the built-in one. Anyone may load it.
+export const logoUrl = (version) =>
+  version ? `${API_URL}/settings/logo?v=${encodeURIComponent(version)}` : null;
+
 export class ApiError extends Error {
   constructor(message, status) {
     super(message);
@@ -49,7 +53,7 @@ async function http(path, { method = "GET", body, form, upload, token } = {}) {
     let detail = "";
     try {
       const data = await res.json();
-      detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(" ") : data.detail;
+      detail = Array.isArray(data.detail) ? data.detail.map((d) => String(d.msg).replace(/^Value error, /, "")).join(" ") : data.detail;
     } catch {
       /* body wasn't JSON */
     }
@@ -167,8 +171,44 @@ export function createApi(tokenSource, onUnauthorized) {
     // The backend archives the entry; nothing is ever erased.
     deleteDisbursement: (id) => call(ROUTES.disbursement(id), { method: "DELETE" }),
 
-    createProject: (title) => call(ROUTES.projects, { method: "POST", body: { title } }),
-    // Archives the project with all its entries (restorable for 30 days)
+    // A new project needs its purchase order: { title, po_number, amount, file (PDF) }
+    createProject: ({ title, po_number, amount, file }) => {
+      const form = new FormData();
+      form.append("title", title);
+      form.append("po_number", po_number);
+      form.append("amount", amount);
+      form.append("po_file", file);
+      return call(ROUTES.projects, { method: "POST", upload: form });
+    },
+    // Admins: add or correct a project's PO. Only the parts given are changed.
+    updateProjectPo: (id, { po_number, amount, file } = {}) => {
+      const form = new FormData();
+      if (po_number != null) form.append("po_number", po_number);
+      if (amount != null) form.append("amount", amount);
+      if (file) form.append("po_file", file);
+      return call(`${ROUTES.projects}/${id}/po`, { method: "PUT", upload: form });
+    },
+    // A link to the PO PDF that works for 2 minutes, to open in a new browser tab (a tab can't
+    // send the sign-in header). Returns the full address.
+    poFileUrl: async (id) => {
+      const { url } = await call(`${ROUTES.projects}/${id}/po-file/link`, { method: "POST" });
+      return new URL(API_URL + url, window.location.href).href;
+    },
+    // App settings (user menu → Settings). Public ones need no sign-in (the sign-in page);
+    // getSettings returns { values, schema? (admins), backup_requested? }
+    getPublicSettings: () => http("/settings/public"),
+    getSettings: () => call("/settings"),
+    updateSettings: (changes) => call("/settings", { method: "PUT", body: changes }),
+    // How many archived items a shorter retention period would delete: { projects, entries }
+    previewRetention: (days) => call(`/settings/retention-preview?archive_retention_days=${days}`),
+    backupNow: () => call("/settings/backup-now", { method: "POST" }),
+    uploadLogo: (file) => {
+      const form = new FormData();
+      form.append("file", file);
+      return call("/settings/logo", { method: "PUT", upload: form });
+    },
+    removeLogo: () => call("/settings/logo", { method: "DELETE" }),
+    // Archives the project with all its entries (restorable for the retention period in Settings)
     archiveProject: (id) => call(`${ROUTES.projects}/${id}`, { method: "DELETE" }),
     // Several at once: each returns { done, skipped: [reasons] }
     bulkArchive: (ids, reason) => call("/disbursements/bulk-archive", { method: "POST", body: { ids, reason: reason || null } }),
@@ -268,7 +308,7 @@ export function createApi(tokenSource, onUnauthorized) {
         let detail = "";
         try {
           const data = await res.json();
-          detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(" ") : data.detail;
+          detail = Array.isArray(data.detail) ? data.detail.map((d) => String(d.msg).replace(/^Value error, /, "")).join(" ") : data.detail;
         } catch {
           /* body wasn't JSON */
         }

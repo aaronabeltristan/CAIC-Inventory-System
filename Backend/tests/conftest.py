@@ -63,6 +63,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
 import auth  # noqa: E402  (creates the tables)
+import app_settings  # noqa: E402
 import chatbot  # noqa: E402
 import database  # noqa: E402
 import models  # noqa: E402
@@ -85,7 +86,9 @@ def _clean_database():
     with database.engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
     chatbot._NAMES_CACHE["at"] = 0.0
+    app_settings.clear_cache()
     yield
+    app_settings.clear_cache()
 
 
 @pytest.fixture
@@ -157,13 +160,43 @@ def staff2(client):
     return Person(client, "clerk2")
 
 
-def add_entry(client, who, project="Bamban Plant", cv_no="CV-001", payee="Acme Supply",
+def add_entry(client, who, project="Bamban Plant", cv_no="000001", payee="Acme Supply",
               amount="1500.00", date="2026-10-01") -> dict:
     r = client.post("/disbursements/", headers=who.auth, json={
         "project_title": project, "cv_no": cv_no, "payee": payee, "date": date, "amount": amount,
     })
     assert r.status_code == 201, r.text
     return r.json()
+
+
+PDF = b"%PDF-1.4\n% test purchase order\n%%EOF\n"
+_po_counter = [0]
+
+
+def new_project(client, who, title, po_number=None, amount="100000.00", pdf=PDF, filename="po.pdf"):
+    """Creates a project the way the app does (form with the PO PDF). Returns the response."""
+    if po_number is None:
+        _po_counter[0] += 1
+        po_number = f"{900000 + _po_counter[0]}"
+    files = {"po_file": (filename, pdf, "application/pdf")} if pdf is not None else None
+    data = {"title": title, "po_number": po_number, "amount": amount}
+    return client.post("/projects", headers=who.auth, data=data, files=files)
+
+
+def set_setting(key, value):
+    """Saves a setting straight into the database, as if an admin had (tests only)."""
+    _, stored = app_settings.validate(key, value)
+    db = database.SessionLocal()
+    try:
+        row = db.get(models.AppSetting, key)
+        if row:
+            row.value = stored
+        else:
+            db.add(models.AppSetting(key=key, value=stored))
+        db.commit()
+    finally:
+        db.close()
+    app_settings.clear_cache()
 
 
 def logs(db, action=None):

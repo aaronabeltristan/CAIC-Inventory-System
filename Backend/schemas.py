@@ -4,7 +4,9 @@ from decimal import Decimal
 from typing import Annotated, List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer, model_validator
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer, field_validator, model_validator
 
 
 # The amount column is NUMERIC(10, 2): at most 99,999,999.99, with centavos.
@@ -12,14 +14,23 @@ Amount = Annotated[Decimal, Field(gt=0, le=Decimal("99999999.99"), decimal_place
 # Text that can't be empty or only spaces (surrounding spaces are removed)
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
 
+# CV and PO numbers are numbers only (digits 0-9, leading zeros kept), stored as text
+NUMBER_ONLY = re.compile(r"^\d{1,30}$")
+CV_RULE_MESSAGE = "CV no. must be numbers only (0-9), up to 30 digits."
+
+
+def check_cv_no(value):
+    if value is None:
+        return value
+    value = value.strip()
+    if not NUMBER_ONLY.match(value):
+        raise ValueError(CV_RULE_MESSAGE)
+    return value
+
 
 # ==========================================
 # PROJECT SCHEMAS
 # ==========================================
-
-
-class ProjectCreate(BaseModel):
-    title: Text
 
 
 class ProjectResponse(BaseModel):
@@ -27,6 +38,10 @@ class ProjectResponse(BaseModel):
     title: str
     total_amount: Decimal
     entry_count: int = 0  # includes archived entries
+    # Purchase order (see purchase_orders.py). None for projects made before POs existed.
+    po_number: Optional[str] = None
+    po_amount: Optional[Decimal] = None
+    has_po_file: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -43,6 +58,11 @@ class DisbursementCreate(BaseModel):
     date: date
     amount: Amount
 
+    @field_validator("cv_no")
+    @classmethod
+    def _cv_numbers_only(cls, v):
+        return check_cv_no(v)
+
 
 class DisbursementUpdate(BaseModel):
     date: Optional[dt.date] = None
@@ -53,6 +73,11 @@ class DisbursementUpdate(BaseModel):
     # The values the editor saw for the fields being changed. If they no longer match,
     # someone else changed the entry first and the edit is refused (409).
     original: Optional[dict] = None
+
+    @field_validator("cv_no")
+    @classmethod
+    def _cv_numbers_only(cls, v):
+        return check_cv_no(v)
 
 
 class DisbursementItemResponse(BaseModel):
@@ -94,9 +119,13 @@ class DisbursementListItem(DisbursementItemResponse):
 
 
 class ProjectSummaryResponse(BaseModel):
+    project_id: Optional[int] = None
     project_title: str
     entries: List[DisbursementItemResponse]
     total_amount: Decimal
+    po_number: Optional[str] = None
+    po_amount: Optional[Decimal] = None
+    has_po_file: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

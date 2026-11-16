@@ -6,7 +6,7 @@ import json
 import pytest
 
 import chatbot
-from tests.conftest import add_entry
+from tests.conftest import add_entry, new_project
 
 
 class FakeModel:
@@ -106,8 +106,8 @@ def test_staff_asking_for_activity_log_is_told_it_is_admin_only(client, model, s
     assert "Only admins" in fake.rounds[0][0][-1]["content"]
 
 
-@pytest.mark.parametrize("question", ["delete CV-001", "please archive the Bamban Plant project",
-                                      "can you change the amount of CV-001 to 5000"])
+@pytest.mark.parametrize("question", ["delete CV 000001", "please archive the Bamban Plant project",
+                                      "can you change the amount of CV 000001 to 5000"])
 def test_requests_to_change_data_get_no_lookups(client, model, staff, question):
     add_entry(client, staff)
     fake = model("I can't change anything from the chat.")
@@ -152,9 +152,9 @@ USER = {"id": 1, "username": "clerk", "name": "Clerk Tester", "is_admin": False}
 
 
 def test_search_entries_totals_and_full_names(client, db, staff):
-    add_entry(client, staff, cv_no="CV-1", amount="100.10")
-    add_entry(client, staff, cv_no="CV-2", amount="0.20")
-    add_entry(client, staff, project="Other", cv_no="CV-3", amount="5")
+    add_entry(client, staff, cv_no="100001", amount="100.10")
+    add_entry(client, staff, cv_no="100002", amount="0.20")
+    add_entry(client, staff, project="Other", cv_no="100003", amount="5")
     result = chatbot.tool_search_entries(db, {"project": "bamban"}, USER)
     assert result["matching_entries"] == 2
     assert "100.30" in result["total_amount"]
@@ -162,15 +162,15 @@ def test_search_entries_totals_and_full_names(client, db, staff):
 
 
 def test_search_leaves_out_archived_entries(client, db, admin, staff):
-    e = add_entry(client, staff, cv_no="CV-1")
+    e = add_entry(client, staff, cv_no="100001")
     client.delete(f"/disbursements/{e['id']}", headers=admin.auth)
-    assert chatbot.tool_search_entries(db, {"cv_no": "CV-1"}, USER)["matching_entries"] == 0
+    assert chatbot.tool_search_entries(db, {"cv_no": "100001"}, USER)["matching_entries"] == 0
 
 
 def test_summarize_largest_and_smallest(client, db, staff):
-    add_entry(client, staff, project="Big", cv_no="CV-1", amount="900")
-    add_entry(client, staff, project="Small", cv_no="CV-2", amount="10")
-    client.post("/projects", headers=staff.auth, json={"title": "Empty"})
+    add_entry(client, staff, project="Big", cv_no="100001", amount="900")
+    add_entry(client, staff, project="Small", cv_no="100002", amount="10")
+    new_project(client, staff, "Empty")
     largest = chatbot.tool_summarize(db, {"group_by": "project"}, USER)
     assert [g["project"] for g in largest["groups"]] == ["Big", "Small"]
     smallest = chatbot.tool_summarize(db, {"group_by": "project", "order": "smallest"}, USER)
@@ -179,8 +179,8 @@ def test_summarize_largest_and_smallest(client, db, staff):
 
 
 def test_summarize_by_month_in_date_order(client, db, staff):
-    add_entry(client, staff, cv_no="CV-1", date="2026-03-15", amount="1")
-    add_entry(client, staff, cv_no="CV-2", date="2026-01-15", amount="2")
+    add_entry(client, staff, cv_no="100001", date="2026-03-15", amount="1")
+    add_entry(client, staff, cv_no="100002", date="2026-01-15", amount="2")
     months = chatbot.tool_summarize(db, {"group_by": "month"}, USER)["groups"]
     assert [m["month"] for m in months] == ["2026-01", "2026-03"]
 
