@@ -87,6 +87,30 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
   const [importOpen, setImportOpen] = useState(false);
   const [liveStatus, setLiveStatus] = useState("connecting");
   const [liveVersion, setLiveVersion] = useState(0); // bumps on every change, so open windows reload
+
+  // Browser Back / Forward: every screen (page + open project) is a step in the browser's
+  // history, so the browser's Back button does the same as the app's "← Back".
+  const historyReady = useRef(false);
+  useEffect(() => {
+    const here = { caic: true, page, view };
+    const current = window.history.state;
+    if (!historyReady.current) {
+      historyReady.current = true;
+      window.history.replaceState(here, "");
+    } else if (!(current?.caic && current.page === page && current.view === view)) {
+      window.history.pushState(here, "");   // not already there (i.e. not reached with Back/Forward)
+    }
+  }, [page, view]);
+  useEffect(() => {
+    const onPop = (e) => {
+      if (!e.state?.caic) return;
+      setDialog(null);
+      setPage(e.state.page);
+      setView(e.state.view);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   // For the live-updates handler below, which is set up once
   const profileIdRef = useRef(null);
   const loadLoginRequestsRef = useRef(loadLoginRequests);

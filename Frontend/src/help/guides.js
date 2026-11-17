@@ -85,7 +85,7 @@ export const GUIDES = [
       "Type in the **search bar** at the top: part of a project title, a payee or a PO number. Inside a project, the search finds entries by payee or CV number.",
       "Use the **Filter by** chips to choose where to look: **Project Title** (the default), **Payee / Particulars** or **PO Number**. The search looks in that one field only.",
       "Click a column title such as **PROJECT TITLE** or **TOTAL DISBURSEMENT AMOUNT** to sort. Click again to reverse.",
-      "Click **View** on a project to see its entries (the *Summary of Expenses*). **← Back** returns to the list.",
+      "Click **View** on a project to see its entries (the *Summary of Expenses*). **← Back** (or the browser's Back button) returns to the list.",
     ],
     go: { page: "home" },
   },
