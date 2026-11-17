@@ -46,7 +46,7 @@ The app has no hardware LEDs. These coloured dots on screen play the same role:
 | **System status** | **Settings → Status** (admins) | Every part is working | Working, but something needs a look | **Red**: a part isn't working. **Grey**: turned off on purpose |
 | **One light per part** | Settings → Status table | | | |
 | — Database | | Answers (time in ms) | `W-DB-02` slow (over 500 ms) | `E-DB-01` can't be reached |
-| — Backups | | Last backup under 26 h ago | `W-BK-02` none in 26 h, or `W-BK-03` *Back up now* not started after 5 min | `E-BK-01` the last backup failed |
+| — Backups | | Last backup under 26 h ago, and the backup service alive | `W-BK-04` backup service stopped (no heartbeat for 3 min), `W-BK-02` none in 26 h, or `W-BK-03` *Back up now* not started after 5 min | `E-BK-01` the last backup failed |
 | — Automatic clean-up | | Ran in the last 2 h | `W-PU-01` hasn't run in 2 h | grey: `PURGE_ENABLED=false` |
 | — Server errors (24 h) | | None | `W-ER-01` some, with the latest error ID | — |
 | — Live updates | | Watching (number of open screens) | — | `E-LV-01` the watcher stopped |
@@ -81,6 +81,7 @@ The same list is in `Backend/health.py` (`CODES`).
 | `E-BK-01` | The last backup failed | Read the reason (status table, or Activity Log → record type *Backups*). Usual causes: wrong or missing `BACKUP_PASSPHRASE`, backups folder missing or full. `docker logs caic-backup` |
 | `W-BK-02` | No backup in the last 26 hours | Is `caic-backup` running? `docker start caic-backup`. Then **Back up now** |
 | `W-BK-03` | *Back up now* hasn't started after 5 minutes | The backup container isn't running: `docker start caic-backup` |
+| `W-BK-04` | The backup service stopped: it reports "alive" every minute (heartbeat) and hasn't for 3 minutes (60 while a backup is running) | `docker start caic-backup`; read `docker logs caic-backup` |
 | `W-PU-01` | The automatic clean-up hasn't run in 2 hours | `docker restart caic-api`; read `docker logs caic-api` (lines starting `[purge]`) |
 | `E-LV-01` | Live updates stopped | `docker restart caic-api`. Lines starting `[live]` in its log give the reason |
 | `W-ER-01` | Server errors in the last 24 hours | Activity Log, action **Server error**. Each has an error ID to look up in `docker logs caic-api` (see 3.3) |
@@ -154,6 +155,7 @@ Parts of the system that check other parts and fix or report problems by themsel
 | **autoheal** (`caic-autoheal`) | Containers labelled `autoheal=true`: api, assistant, web, ollama | 30 s | Restarts any that are **unhealthy** (e.g. a backend that's running but frozen) | `docker logs caic-autoheal` |
 | **Database start order** | The backend and backup containers wait until `postgres-db` is healthy | At start | They don't start against a database that isn't ready | `docker compose -p backend ps` |
 | **Backup retry** | The nightly backup | Every minute | After a failure it tries again an hour later; a missed 2 AM backup runs as soon as the server is on | Backup light, `E-BK-01` / `W-BK-02` |
+| **Backup heartbeat** | The backup service | Every minute | Writes "alive" to the database; if it stops, Status shows `W-BK-04` within about 3 minutes | Status table: "service alive … ago" |
 | **Clean-up heartbeat** | The hourly clean-up of archived items and old log rows | Each run | Records each run; if it stops, Settings → Status shows `W-PU-01` | Status table: "Last run …" |
 | **Live-update watcher** | New Activity Log rows, pushed to open screens | 1.5 s | Retries after a database hiccup; if it stops, `E-LV-01` | Live dot; Status table |
 | **Browser reconnect** | Each screen's live connection | Continuously | Reconnects by itself; the dot shows **Reconnecting…** meanwhile | Live dot |
@@ -176,7 +178,7 @@ back. Fix the database, not the backend.
 | One action fails with an error ID | Activity Log → Server error; look up the ID in `docker logs caic-api` | A bug, or bad data in that record | `E-xxxxxxxx` |
 | Other people's changes don't appear | Live dot | Live connection dropped (network), or the watcher stopped | `E-LV-01` |
 | The assistant doesn't answer | Settings → Status → Assistant | `caic-ollama` stopped, model missing, or turned off | `E-AI-01`, `W-AI-02` |
-| Backup light yellow or red | Settings → System → Backups; `docker logs caic-backup` | Backup container stopped, wrong passphrase, folder missing | `E-BK-01`, `W-BK-02`, `W-BK-03` |
+| Backup light yellow or red | Settings → Status → Backups; `docker logs caic-backup` | Backup container stopped, wrong passphrase, folder missing | `E-BK-01`, `W-BK-02`, `W-BK-03`, `W-BK-04` |
 | Archived items aren't being deleted | Settings → Status → Automatic clean-up | Clean-up stopped, or `PURGE_ENABLED=false` | `W-PU-01` |
 | One person keeps getting signed out | Activity Log for that user | Signed in on another device, inactivity limit, deactivated account | (HTTP 401) |
 | One person can't sign in | Activity Log: *Failed sign-in* | Wrong password lockout (429), account waiting for approval or deactivated | (HTTP 429/403) |

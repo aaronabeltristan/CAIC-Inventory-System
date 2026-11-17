@@ -30,6 +30,9 @@ router = APIRouter(tags=["Health"])
 STARTED = time.time()
 BACKUP_STALE_HOURS = 26          # a nightly backup plus some slack (the server may be off at 2 AM)
 BACKUP_REQUEST_STALE_MINUTES = 5 # "Back up now" not picked up by then: the backup container isn't running
+BACKUP_HEARTBEAT_MINUTES = 3     # the backup container says "alive" every minute (backup.sh heartbeat)
+BACKUP_BUSY_MINUTES = 60         # ...except while a backup runs, which can take longer
+BACKUP_HEARTBEAT_KEY = "backup_heartbeat"
 PURGE_STALE_HOURS = 2            # the clean-up runs every hour
 LIVE_STALE_SECONDS = 15          # the live-update watcher checks every 1.5 s
 SLOW_DB_MS = 500
@@ -47,6 +50,8 @@ CODES = {
     "W-BK-02": ("No backup in the last 26 hours", "Is the backup container running? docker start caic-backup; "
                 "use Back up now in Settings → System"),
     "W-BK-03": ("Back up now hasn't started after 5 minutes", "The backup container isn't running: docker start caic-backup"),
+    "W-BK-04": ("The backup service stopped (no heartbeat)", "It reports every minute and hasn't for 3 minutes: "
+                "docker start caic-backup; see docker logs caic-backup"),
     "W-PU-01": ("The automatic clean-up hasn't run in 2 hours", "Restart the backend: docker restart caic-api; see docker logs caic-api"),
     "E-LV-01": ("Live updates stopped", "Screens won't refresh by themselves. Restart the backend: docker restart caic-api"),
     "W-ER-01": ("Server errors in the last 24 hours", "Open Activity Log, action Server error: each has an error ID "
@@ -113,23 +118,36 @@ def check_assistant() -> dict:
 
 
 def check_backups(db: Session) -> dict:
+    """Worst problem first: a failed backup, then a stopped backup service (heartbeat), then
+    a Back up now that nobody picked up, then no recent backup."""
     def latest(action):
         return (db.query(models.ActivityLog.created_at, models.ActivityLog.summary)
                 .filter(models.ActivityLog.action == action)
                 .order_by(models.ActivityLog.created_at.desc()).first())
     ok, failed = latest("backup"), latest("backup_failed")
-    requested = db.get(models.AppSetting, app_settings.BACKUP_REQUEST_KEY)
-    if requested is not None and requested.value and requested.updated_at is not None:
-        waiting = datetime.now(timezone.utc) - _aware(requested.updated_at)
-        if waiting > timedelta(minutes=BACKUP_REQUEST_STALE_MINUTES):
-            return _component("backups", "Backups", "warn", f"Back up now was asked {_ago(requested.updated_at)}", "W-BK-03")
+    now = datetime.now(timezone.utc)
     if failed and (not ok or _aware(failed[0]) > _aware(ok[0])):
         return _component("backups", "Backups", "fail", f"{failed[1]} ({_ago(failed[0])})", "E-BK-01")
+
+    # Heartbeat. No row at all: a backup container from before heartbeats (or none yet), so
+    # this check is skipped rather than raising a false alarm.
+    beat = db.get(models.AppSetting, BACKUP_HEARTBEAT_KEY)
+    if beat is not None and beat.updated_at is not None:
+        limit = BACKUP_BUSY_MINUTES if beat.value == "busy" else BACKUP_HEARTBEAT_MINUTES
+        if now - _aware(beat.updated_at) > timedelta(minutes=limit):
+            return _component("backups", "Backups", "warn",
+                              f"No sign of life from the backup service since {_ago(beat.updated_at)}", "W-BK-04")
+
+    requested = db.get(models.AppSetting, app_settings.BACKUP_REQUEST_KEY)
+    if requested is not None and requested.value and requested.updated_at is not None:
+        if now - _aware(requested.updated_at) > timedelta(minutes=BACKUP_REQUEST_STALE_MINUTES):
+            return _component("backups", "Backups", "warn", f"Back up now was asked {_ago(requested.updated_at)}", "W-BK-03")
     if not ok:
         return _component("backups", "Backups", "warn", "No backup recorded yet", "W-BK-02")
-    if datetime.now(timezone.utc) - _aware(ok[0]) > timedelta(hours=BACKUP_STALE_HOURS):
+    if now - _aware(ok[0]) > timedelta(hours=BACKUP_STALE_HOURS):
         return _component("backups", "Backups", "warn", f"Last backup {_ago(ok[0])}", "W-BK-02")
-    return _component("backups", "Backups", "ok", f"Last backup {_ago(ok[0])}")
+    alive = f"; service alive {_ago(beat.updated_at)}" if beat is not None and beat.updated_at else ""
+    return _component("backups", "Backups", "ok", f"Last backup {_ago(ok[0])}{alive}")
 
 
 def check_cleanup(db: Session) -> dict:

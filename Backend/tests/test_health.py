@@ -98,3 +98,40 @@ def test_schema_upgrade_only_changes_what_is_missing(capsys):
     assert "applied 1 database change" in capsys.readouterr().out
     with database.engine.connect() as conn:
         assert conn.execute(text("SELECT 1 FROM pg_indexes WHERE indexname = 'ux_projects_po_number'")).first()
+
+
+def _beat(db, state, minutes_ago):
+    row = db.get(models.AppSetting, "backup_heartbeat")
+    when = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    if row is None:
+        db.add(models.AppSetting(key="backup_heartbeat", value=state, updated_by="backup", updated_at=when))
+    else:
+        row.value, row.updated_at = state, when
+    db.commit()
+
+
+def test_stopped_backup_service_is_noticed_from_its_heartbeat(client, db, admin):
+    activity.log(db, "system", "backup", "Backup saved", "backup")
+    db.commit()
+    _beat(db, "idle", 1)
+    ok = component(client, admin, "backups")
+    assert ok["status"] == "ok" and "service alive" in ok["detail"]
+    _beat(db, "idle", 4)                                    # no "alive" for 4 minutes
+    stopped = component(client, admin, "backups")
+    assert stopped["status"] == "warn" and stopped["code"] == "W-BK-04"
+
+
+def test_a_long_backup_is_not_mistaken_for_a_stopped_service(client, db, admin):
+    activity.log(db, "system", "backup", "Backup saved", "backup")
+    db.commit()
+    _beat(db, "busy", 20)                                   # a backup has been running 20 minutes
+    assert component(client, admin, "backups")["status"] == "ok"
+    _beat(db, "busy", 70)                                   # far too long: something's wrong
+    assert component(client, admin, "backups")["code"] == "W-BK-04"
+
+
+def test_without_any_heartbeat_the_check_is_skipped(client, db, admin):
+    """An older backup container (before heartbeats) mustn't raise a false alarm."""
+    activity.log(db, "system", "backup", "Backup saved", "backup")
+    db.commit()
+    assert component(client, admin, "backups")["status"] == "ok"

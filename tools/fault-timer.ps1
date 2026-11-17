@@ -35,7 +35,7 @@ $results = Join-Path $root "docs\fault-results.csv"
 $inject = @{
     backend   = { docker stop caic-api | Out-Null }
     database  = { docker stop postgres-db | Out-Null }
-    backup    = { docker stop caic-backup | Out-Null; Write-Host "Now click Back up now in Settings → System." -ForegroundColor Yellow }
+    backup    = { docker stop caic-backup | Out-Null; Write-Host "Watch Settings → Status → Backups: W-BK-04 within about 3 minutes." -ForegroundColor Yellow }
     assistant = { docker stop caic-ollama | Out-Null }
     # Ends the backend's main process from inside, like a crash: Docker's restart policy starts it again
     crash     = { docker exec caic-api python -c "import os, signal; os.kill(1, signal.SIGTERM)" 2>$null | Out-Null }
@@ -43,7 +43,7 @@ $inject = @{
 $describe = @{
     backend   = "F1 Backend stopped (docker stop caic-api)"
     database  = "F2 Database stopped (docker stop postgres-db)"
-    backup    = "F3 Backup service stopped (docker stop caic-backup + Back up now)"
+    backup    = "F3 Backup service stopped (docker stop caic-backup)"
     assistant = "F4 AI model server stopped (docker stop caic-ollama)"
     crash     = "F5 Backend crash, automatic recovery (kill the backend process)"
 }

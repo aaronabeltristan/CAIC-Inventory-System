@@ -5,6 +5,7 @@
 #                                 (Settings → System; BACKUP_HOUR until an admin saves one),
 #                                 or as soon as the server is on if that time was missed. Also
 #                                 makes a backup when an admin clicks "Back up now" (checked every minute)
+#                                 and writes a heartbeat each minute (Settings → Status, W-BK-04)
 #   backup.sh now [label]         back up right away (saved under manual/)
 #   backup.sh list                show the backups
 #   backup.sh restore FILE        restore FILE into a separate database, caic_db_restore, to check it
@@ -56,6 +57,18 @@ backup_requested() {
   v=$(psql -tAX -c "SELECT value FROM app_settings WHERE key = 'backup_request'" 2>/dev/null | tr -d '[:space:]')
   [ -n "$v" ]
 }
+# Heartbeat: "I'm alive", written to app_settings every minute (key backup_heartbeat), so the
+# app's Settings → Status can tell within minutes that this service stopped (code W-BK-04),
+# instead of only when the next nightly backup is missed. "busy" while a backup runs, since
+# a backup can take longer than a minute.
+heartbeat() {
+  psql -q -X -v state="$1" >/dev/null 2>&1 <<'SQL' || true
+INSERT INTO app_settings (key, value, updated_by, updated_at)
+VALUES ('backup_heartbeat', :'state', 'backup', now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = 'backup', updated_at = now();
+SQL
+}
+
 clear_backup_request() {
   psql -q -X -c "UPDATE app_settings SET value = '' WHERE key = 'backup_request'" >/dev/null 2>&1 \
     || log "couldn't clear the backup request"
@@ -153,6 +166,7 @@ schedule() {
   last_fail=0
   last_shown="$HOUR/$KEEP_DAILY/$KEEP_WEEKLY/$KEEP_MONTHLY"
   while true; do
+    heartbeat idle
     load_settings
     shown="$HOUR/$KEEP_DAILY/$KEEP_WEEKLY/$KEEP_MONTHLY"
     if [ "$shown" != "$last_shown" ]; then
@@ -162,6 +176,7 @@ schedule() {
     if backup_requested; then
       clear_backup_request
       log "backup requested from the app"
+      heartbeat busy
       wait_for_db && backup "$MANUAL" requested
     fi
     today=$(date +%Y-%m-%d)
@@ -169,6 +184,7 @@ schedule() {
     now=$(date +%s)
     if [ "$hour" -ge "$HOUR" ] && ! ls "$DAILY/${DB}_${today}_"*.gpg >/dev/null 2>&1 \
        && [ $((now - last_fail)) -ge 3600 ]; then   # after a failure, try again an hour later
+      heartbeat busy
       if wait_for_db && backup "$DAILY"; then
         promote
         prune "$DAILY" "$KEEP_DAILY"

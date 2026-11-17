@@ -84,13 +84,13 @@ T-repaired in the run sheet (section 6), and cause the fault with the command sh
 
 | | |
 |---|---|
-| **Cause** | `docker stop caic-backup`, then click **Back up now** in Settings → System (script: `-Fault backup`; it reminds you to click) |
+| **Cause** | `docker stop caic-backup` (script: `-Fault backup`). Clicking **Back up now** is optional |
 | **Simulates** | Backups silently stopped: the most dangerous kind of fault, because the app keeps working |
-| **Expected symptoms** | Nothing visible to staff. *Back up now* shows "Backup requested…" and never finishes. After 5 minutes Settings → Status: Backups yellow **W-BK-03**. Without *Back up now*, the nightly backup is missed and **W-BK-02** shows after 26 hours |
-| **Diagnose** | Settings → Status (W-BK-03); `docker compose -p backend ps` (caic-backup *Exited*) |
-| **Repair** | `docker start caic-backup`; within a minute it makes the requested backup; check Settings → System → Backups (green, new time) and Status (green) |
+| **Expected symptoms** | Nothing visible to staff. Within about 3 minutes Settings → Status: Backups yellow **W-BK-04** (the service's heartbeat stopped). If *Back up now* was clicked, it shows "Backup requested…" and never finishes. (Before the heartbeat existed, detection needed *Back up now* (5 min, W-BK-03) or took up to 26 hours (W-BK-02).) |
+| **Diagnose** | Settings → Status (W-BK-04); `docker compose -p backend ps` (caic-backup *Exited* or missing) |
+| **Repair** | `docker start caic-backup`; within a minute Status shows "service alive" again (and it makes the backup, if one was requested) |
 | **Tools** | Settings → Status and System → Backups, `docker compose ps`, `docker logs caic-backup`, Activity Log (*Backup saved*) |
-| **Note** | TTD here is limited by design (the 5-minute and 26-hour thresholds). Record it anyway: it shows why item 3 proposes alerts |
+| **Note** | TTD is limited by the heartbeat limit (3 minutes). Runs measured before the heartbeat (with Back up now and the 5-minute W-BK-03) are a useful *before* to compare with |
 
 ### F4: AI model server stopped
 
@@ -154,6 +154,8 @@ Averages of your runs, from `docs\fault-results.csv`. Times in seconds.
 | Date | Found during | Signal | Cause | Fix |
 |---|---|---|---|---|
 | 2026-11-17 | F2 repair (`docker restart caic-api caic-assistant` while a screen was open) | Settings → Status: **W-ER-01**, 3 server errors; latest **E-01C64378** on `GET /projects`: `DeadlockDetected` | Every backend process (4 api workers, the assistant, the start-up check) ran the database upgrade step (`ensure_schema`) at the same moment. Each `ALTER TABLE` locks its table, so they and the screen's read of the projects blocked each other | `database.ensure_schema()` now checks what's already there and changes nothing when nothing is missing; changes, when needed, are made by one process at a time (advisory lock) with a 5-second lock timeout. Test: `test_schema_upgrade_only_changes_what_is_missing` |
+
+| 2026-11-17 | F3 (backup service stopped) | Detection depended on someone clicking *Back up now* (5-minute W-BK-03), otherwise up to 26 hours (W-BK-02) | The app had no way to tell the backup service had stopped until a backup was due or requested | **Heartbeat**: the backup service writes "alive" every minute (`backup.sh`), Status shows **W-BK-04** after 3 minutes without one (60 while a backup runs). Tests: `test_stopped_backup_service_is_noticed_from_its_heartbeat` and two more |
 
 This is the error-ID path working as designed: the status light showed the warning, the ID linked the screen, the Activity Log and the backend log, and the log line named the cause.
 
