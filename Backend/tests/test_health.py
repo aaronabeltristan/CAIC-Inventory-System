@@ -80,3 +80,21 @@ def test_unexpected_errors_get_an_id_and_a_log_row(client, db, admin):
     assert row.details["error_id"] == error_id and "boom for the test" in row.summary
     errors = component(client, admin, "errors")
     assert errors["code"] == "W-ER-01" and errors["latest_error_id"] == error_id
+
+
+def test_schema_upgrade_only_changes_what_is_missing(capsys):
+    """Every backend process runs ensure_schema() at start. When nothing is missing it must
+    change nothing (no table locks): several processes doing ALTER TABLE at once, while screens
+    were reading, caused a deadlock (Server error E-01C64378, found by a fault test)."""
+    import database
+    from sqlalchemy import text
+    database.ensure_schema()
+    capsys.readouterr()
+    database.ensure_schema()
+    assert "[schema]" not in capsys.readouterr().out          # nothing to do the second time
+    with database.engine.begin() as conn:
+        conn.execute(text("DROP INDEX IF EXISTS ux_projects_po_number"))
+    database.ensure_schema()
+    assert "applied 1 database change" in capsys.readouterr().out
+    with database.engine.connect() as conn:
+        assert conn.execute(text("SELECT 1 FROM pg_indexes WHERE indexname = 'ux_projects_po_number'")).first()

@@ -1,4 +1,5 @@
 import os
+import re
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -113,9 +114,64 @@ def ensure_schema():
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS po_amount NUMERIC(14, 2)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_po_number ON projects (lower(po_number))",
     ]
+    _apply_schema_changes(statements)
+
+
+# Each process of the backend (4 api workers, the assistant, the start-up check) runs
+# ensure_schema() when it starts. Changing a table locks it, so several processes doing it at
+# once, while screens are reading, caused a deadlock (seen as Server error E-01C64378 on
+# GET /projects during a fault test). Now each start first checks what is already there and
+# only runs what's missing; that is done by one process at a time, and it gives up waiting
+# after LOCK_TIMEOUT instead of blocking requests.
+_SCHEMA_LOCK_ID = 7_302_118   # any fixed number: PostgreSQL advisory lock for schema changes
+_LOCK_TIMEOUT = "5s"
+_ADD_COLUMN = re.compile(r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)", re.I)
+_CREATE_INDEX = re.compile(r"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)", re.I)
+_SET_DEFAULT = re.compile(r"ALTER TABLE (\w+) ALTER COLUMN (\w+) SET DEFAULT (.+)$", re.I)
+
+
+def _missing(statements, columns, defaults, indexes):
+    todo = []
+    for sql in statements:
+        m = _ADD_COLUMN.search(sql)
+        if m and (m.group(1).lower(), m.group(2).lower()) in columns:
+            continue
+        m = _CREATE_INDEX.search(sql)
+        if m and m.group(1).lower() in indexes:
+            continue
+        m = _SET_DEFAULT.search(sql)
+        if m and (defaults.get((m.group(1).lower(), m.group(2).lower())) or "").lower() == m.group(3).strip().lower():
+            continue
+        todo.append(sql)
+    return todo
+
+
+def _current_schema(conn):
+    rows = conn.execute(text(
+        "SELECT table_name, column_name, column_default FROM information_schema.columns "
+        "WHERE table_schema = current_schema()")).all()
+    columns = {(t.lower(), c.lower()) for t, c, _ in rows}
+    defaults = {(t.lower(), c.lower()): d for t, c, d in rows}
+    indexes = {r[0].lower() for r in conn.execute(text(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()")).all()}
+    return columns, defaults, indexes
+
+
+def _apply_schema_changes(statements):
+    # Quick look without any lock: usually everything is already there, so nothing is changed
+    with engine.connect() as conn:
+        todo = _missing(statements, *_current_schema(conn))
+    if not todo:
+        return
     with engine.begin() as conn:
-        for sql in statements:
+        conn.execute(text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'"))
+        conn.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": _SCHEMA_LOCK_ID})
+        # Another process may have done it while this one waited for the lock: check again
+        todo = _missing(statements, *_current_schema(conn))
+        for sql in todo:
             conn.execute(text(sql))
+        if todo:
+            print(f"[schema] applied {len(todo)} database change(s)", flush=True)
 
 
 def init_db():

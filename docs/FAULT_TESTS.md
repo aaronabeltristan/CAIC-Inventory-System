@@ -149,6 +149,14 @@ Averages of your runs, from `docs\fault-results.csv`. Times in seconds.
 
 ---
 
+### Problems found by the tests
+
+| Date | Found during | Signal | Cause | Fix |
+|---|---|---|---|---|
+| 2026-11-17 | F2 repair (`docker restart caic-api caic-assistant` while a screen was open) | Settings → Status: **W-ER-01**, 3 server errors; latest **E-01C64378** on `GET /projects`: `DeadlockDetected` | Every backend process (4 api workers, the assistant, the start-up check) ran the database upgrade step (`ensure_schema`) at the same moment. Each `ALTER TABLE` locks its table, so they and the screen's read of the projects blocked each other | `database.ensure_schema()` now checks what's already there and changes nothing when nothing is missing; changes, when needed, are made by one process at a time (advisory lock) with a 5-second lock timeout. Test: `test_schema_upgrade_only_changes_what_is_missing` |
+
+This is the error-ID path working as designed: the status light showed the warning, the ID linked the screen, the Activity Log and the backend log, and the log line named the cause.
+
 ## 6. Run sheet (one per run, if not using the script)
 
 | Field | Value |
