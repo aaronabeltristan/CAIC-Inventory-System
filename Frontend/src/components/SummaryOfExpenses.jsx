@@ -7,6 +7,7 @@ import Pagination from "./Pagination";
 import { daysLabel, useRetentionDays } from "../hooks/useRetentionDays";
 import { plural, useSelection } from "../hooks/useSelection";
 import { SelectAll, SelectOne, SelectionBar } from "./Selection";
+import { useAppSettings } from "../hooks/useAppSettings";
 
 export default function SummaryOfExpenses({
   api,
@@ -24,6 +25,7 @@ export default function SummaryOfExpenses({
   onEditPo,
 }) {
   const keepFor = daysLabel(useRetentionDays());
+  const { staff_edits_need_approval: editsNeedApproval } = useAppSettings();
   const [sort, setSort] = useState({ key: "date", dir: "desc" });
   const [toDelete, setToDelete] = useState(null);
   const [reason, setReason] = useState("");
@@ -244,7 +246,7 @@ export default function SummaryOfExpenses({
                 </td>
                 <td className="actions">
                   <button className="pill sm view" onClick={() => onEdit(e)}>
-                    {isAdmin ? "Edit" : "Request edit"}
+                    {isAdmin || !editsNeedApproval ? "Edit" : "Request edit"}
                   </button>
                   <button className="pill sm danger" onClick={() => { setReason(""); setToDelete(e); }}>
                     {isAdmin ? "Archive" : "Request archive"}

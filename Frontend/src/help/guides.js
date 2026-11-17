@@ -137,6 +137,7 @@ export const GUIDES = [
       "Click **Request edit** on the entry's row.",
       "Change the values that are wrong. Add a **Reason (optional)**, e.g. *Wrong amount encoded*.",
       "Click **Send request**. The entry changes once an admin approves. See **Track your requests**.",
+      "If an admin has turned off *Staff edits need an admin's approval* (Settings → Requests), the button says **Edit** and your change is saved straight away (still recorded in the Activity Log).",
     ],
     go: { page: "home" },
   },
