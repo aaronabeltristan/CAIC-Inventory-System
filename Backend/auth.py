@@ -1,6 +1,8 @@
 import asyncio
 import os
 import re
+import secrets
+import traceback
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated, List, Optional
@@ -31,6 +33,7 @@ import sessions
 import bulk
 import settings
 import purchase_orders
+import health
 
 # Create database tables automatically, then add any new columns to existing tables
 models.Base.metadata.create_all(bind=database.engine)
@@ -57,6 +60,8 @@ def purge_once() -> None:
         cleaned = activity.purge_routine_logs(db)
         if cleaned:
             print(f"[purge] deleted {cleaned} old routine Activity Log row(s)")
+        # Sign of life for the health check (W-PU-01 if it stops)
+        health.note_purge_run(db, f"removed {removed} archived, {cleaned} log row(s)")
     except Exception as e:  # another server may have purged the same rows first
         db.rollback()
         print(f"[purge] skipped: {e}")
@@ -82,6 +87,40 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Calamba Allied Industrial Corporation", lifespan=lifespan)
+app.include_router(health.router)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    """Any error the code didn't expect (a bug, or a part of the system that's down).
+
+    The person gets a short error ID instead of a bare "Internal Server Error"; the full
+    details go to the backend's log (docker logs caic-api) under the same ID, and a
+    "Server error" row goes in the Activity Log, so an admin can match the two."""
+    error_id = "E-" + secrets.token_hex(4).upper()
+    where = f"{request.method} {request.url.path}"
+    print(f"[error {error_id}] {where}\n{''.join(traceback.format_exception(exc))}", flush=True)
+    try:
+        await run_in_threadpool(_record_server_error, error_id, where, exc)
+    except Exception as log_failure:  # e.g. the database is the thing that's down
+        print(f"[error {error_id}] couldn't write it to the Activity Log: {log_failure}", flush=True)
+    return JSONResponse(status_code=500, content={
+        "detail": f"Something went wrong on the server (error {error_id}). Try again; if it keeps "
+                  f"happening, give this code to an admin.",
+        "error_id": error_id,
+    })
+
+
+def _record_server_error(error_id: str, where: str, exc: Exception) -> None:
+    db = database.SessionLocal()
+    try:
+        activity.log(db, "system", "server_error", f"Server error {error_id} on {where}: {type(exc).__name__}: {exc}"[:500],
+                     "system", None, {"error_id": error_id, "where": where, "type": type(exc).__name__,
+                                      "message": str(exc)[:500]})
+        db.commit()
+    finally:
+        db.close()
+
 app.include_router(deletion_requests.router)
 app.include_router(activity.router)
 app.include_router(password_resets.router)

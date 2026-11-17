@@ -37,6 +37,10 @@ class Hub:
     def __init__(self) -> None:
         self.queues: Set[asyncio.Queue] = set()
         self.last_id: Optional[int] = None
+        # For the health check (health.py): when the watcher last checked successfully, and
+        # the last problem it had
+        self.last_ok: Optional[float] = None
+        self.last_error: Optional[str] = None
 
     def _fetch_new(self) -> list:
         db = database.SessionLocal()
@@ -71,6 +75,7 @@ class Hub:
         while True:
             try:
                 events = await run_in_threadpool(self._fetch_new)
+                self.last_ok = time.time()
                 for event in events:
                     for q in list(self.queues):
                         if q.full():
@@ -81,6 +86,7 @@ class Hub:
                         else:
                             q.put_nowait(event)
             except Exception as e:  # database briefly unreachable: try again next round
+                self.last_error = f"{type(e).__name__}: {e}"[:300]
                 print(f"[live] check failed: {e}")
             await asyncio.sleep(LIVE_CHECK_SECONDS)
 

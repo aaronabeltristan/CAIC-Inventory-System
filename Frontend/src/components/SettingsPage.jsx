@@ -3,6 +3,7 @@ import NameRequests from "./NameRequests";
 import { UsersContent } from "./UsersDialog";
 import { CountBadge } from "./AdminMenu";
 import BackupStatus from "./BackupStatus";
+import SystemStatus from "./SystemStatus";
 import Logo from "./Logo";
 import { setAppSettings } from "../hooks/useAppSettings";
 import { daysLabel } from "../hooks/useRetentionDays";
@@ -12,6 +13,7 @@ import { daysLabel } from "../hooks/useRetentionDays";
 // so a new setting there shows up here without changes.
 const TABS = [
   { key: "users", label: "Manage Users" },
+  { key: "status", label: "Status" },
   { key: "security", label: "Security" },
   { key: "requests", label: "Requests" },
   { key: "system", label: "System" },
@@ -103,6 +105,8 @@ export default function SettingsPage({ api, user, version, pending, initialSecti
             <NameRequests api={api} version={version} onChanged={onChanged} />
             <UsersContent api={api} user={user} version={version} onChanged={onChanged} />
           </>
+        ) : section === "status" ? (
+          <SystemStatus api={api} version={version} />
         ) : loadError ? (
           <p role="alert" className="error">{loadError}</p>
         ) : !data ? (

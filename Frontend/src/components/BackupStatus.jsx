@@ -8,7 +8,8 @@ export default function BackupStatus({ api, version }) {
   const [s, setS] = useState(null);
 
   useEffect(() => {
-    api.backupStatus?.().then(setS, () => setS(null));
+    // Remembers when it was read, so "over a day ago" is measured from then
+    api.backupStatus?.().then((d) => setS(d && { ...d, readAt: Date.now() }), () => setS(null));
   }, [api, version]);
 
   if (!s) return null;
@@ -16,7 +17,7 @@ export default function BackupStatus({ api, version }) {
   const okAt = s.last_ok_at ? new Date(s.last_ok_at).getTime() : 0;
   const failedAt = s.last_failed_at ? new Date(s.last_failed_at).getTime() : 0;
   const failedSince = failedAt > okAt;
-  const stale = !okAt || Date.now() - okAt > STALE_AFTER;
+  const stale = !okAt || s.readAt - okAt > STALE_AFTER;
   const state = failedSince ? "bad" : stale ? "warn" : "ok";
 
   let text;

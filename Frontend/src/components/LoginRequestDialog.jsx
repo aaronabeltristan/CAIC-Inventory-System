@@ -13,8 +13,13 @@ export default function LoginRequestDialog({ api, request, onAllowed, onBlocked,
     if (d && !d.open) d.showModal();
   }, []);
 
-  useEffect(() => {
+  // A fresh copy of the request (re-checked every few seconds): count down from its time left
+  const [countingFor, setCountingFor] = useState(request);
+  if (countingFor !== request) {
+    setCountingFor(request);
     setLeft(request.expires_in);
+  }
+  useEffect(() => {
     const timer = setInterval(() => setLeft((s) => s - 1), 1000);
     return () => clearInterval(timer);
   }, [request]);

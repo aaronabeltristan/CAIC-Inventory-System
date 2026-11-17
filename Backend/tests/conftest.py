@@ -34,6 +34,11 @@ os.environ.update({
     "RESET_PER_IP_PER_HOUR": "10",
     "RESET_TOTAL_PER_HOUR": "60",
     "OLLAMA_HOST": "http://127.0.0.1:9",  # nothing there: the tests replace the model
+    "PURGE_ENABLED": "true",              # a laptop's .env may turn it off (testing on real data)
+    "BACKUP_HOUR": "2",
+    "BACKUP_KEEP_DAILY": "7",
+    "BACKUP_KEEP_WEEKLY": "4",
+    "BACKUP_KEEP_MONTHLY": "6",
 })
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

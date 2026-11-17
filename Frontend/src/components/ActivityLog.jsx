@@ -6,6 +6,7 @@ import PasswordResets from "./PasswordResets";
 import { CountBadge } from "./AdminMenu";
 import Pagination from "./Pagination";
 import ConfirmDialog from "./ConfirmDialog";
+import { ACTIONS, ACTION_LABEL } from "../utils/activityActions";
 import { SelectAll, SelectOne, SelectionBar } from "./Selection";
 import { bulkMessage, plural, useSelection } from "../hooks/useSelection";
 
@@ -15,60 +16,6 @@ const TABS = [
   { key: "requests", label: "Requests" },
   { key: "resets", label: "Password resets" },
 ];
-
-const ACTIONS = [
-  ["", "All actions"],
-  ["create", "Added entry"],
-  ["update", "Edited entry"],
-  ["archive", "Archived"],
-  ["restore", "Restored"],
-  ["archive_requested", "Archive requested"],
-  ["archive_approved", "Archive approved"],
-  ["archive_rejected", "Archive rejected"],
-  ["edit_requested", "Edit requested"],
-  ["edit_approved", "Edit approved"],
-  ["edit_rejected", "Edit rejected"],
-  ["import", "Imported file"],
-  ["export", "Exported to Excel"],
-  ["backup", "Backup saved"],
-  ["backup_failed", "Backup FAILED"],
-  ["restore", "Database restored"],
-  ["project_create", "Created project"],
-  ["project_po_update", "Changed PO"],
-  ["project_archive", "Archived project"],
-  ["project_restore", "Restored project"],
-  ["purge", "Deleted permanently"],
-  ["settings_update", "Changed settings"],
-  ["permanent_delete", "Deleted permanently (by admin)"],
-  ["project_delete", "Deleted project"],
-  ["register", "Registered"],
-  ["account_approved", "Account approved"],
-  ["account_rejected", "Account rejected"],
-  ["name_requested", "Name change requested"],
-  ["name_approved", "Name change approved"],
-  ["name_rejected", "Name change rejected"],
-  ["name_request_cancelled", "Name request withdrawn"],
-  ["name_change", "Changed name"],
-  ["avatar_change", "Changed photo"],
-  ["signed_out_everywhere", "Signed out everywhere"],
-  ["logout", "Signed out"],
-  ["login_challenge", "Sign-in from another device"],
-  ["login_challenge_allowed", "Other device allowed"],
-  ["login_challenge_denied", "Other device blocked"],
-  ["login_challenge_cancelled", "Other device cancelled"],
-  ["login", "Signed in"],
-  ["login_failed", "Failed sign-in"],
-  ["password_change", "Changed password"],
-  ["reset_requested", "Reset requested"],
-  ["reset_approved", "Reset approved"],
-  ["reset_rejected", "Reset rejected"],
-  ["admin_reset", "Password reset by admin"],
-  ["user_update", "Updated account"],
-  ["user_delete", "Deleted account"],
-  ["chat", "Asked the assistant"],
-  ["promote_admin", "Made admin"],
-];
-export const ACTION_LABEL = Object.fromEntries(ACTIONS);
 
 // Record types are logged separately, so each can be viewed on its own
 const RECORD_TYPES = [

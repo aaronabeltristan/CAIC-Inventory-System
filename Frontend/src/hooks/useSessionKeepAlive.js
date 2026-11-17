@@ -15,8 +15,8 @@ const WARN_BEFORE = 2 * 60 * 1000;
 const RETRY_AFTER = 30 * 1000; // after a failed renewal (e.g. offline), wait before trying again
 
 export function useSessionKeepAlive({ token, api, enabled, onRenewed, onExpired }) {
-  const lastActivity = useRef(Date.now());
-  const issuedAt = useRef(Date.now()); // when the current token arrived, on this computer's clock
+  const lastActivity = useRef(0); // none yet
+  const issuedAt = useRef(0); // when the current token arrived, on this computer's clock (set below)
   const expiresAt = useRef(null);
   const renewing = useRef(false);
   const lastTry = useRef(0);

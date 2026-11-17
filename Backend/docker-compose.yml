@@ -65,6 +65,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Watchdog: Docker asks /health every 30 s; after 3 failures the container is "unhealthy"
+    # (docker ps shows it) and autoheal (below) restarts it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      autoheal: "true"
 
   # The assistant (/chat) on its own backend process, so heavy use of the rest of the app can't
   # starve it (at 500 users it froze when it shared the api process). Same code as api; nginx
@@ -81,6 +91,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Watchdog: Docker asks /health every 30 s; after 3 failures the container is "unhealthy"
+    # (docker ps shows it) and autoheal (below) restarts it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      autoheal: "true"
 
   # The app itself: built React files served by nginx, with /api/... passed to the backend.
   # Everyone opens http://<server>/ in a browser; nobody needs the code or npm.
@@ -100,6 +120,16 @@ services:
     depends_on:
       - api
       - assistant
+    # Watchdog: nginx itself answers (the backend has its own check, so a backend problem
+    # doesn't make autoheal restart this one for nothing)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      autoheal: "true"
 
   # Local AI model server for the chatbot. Private: no published port, so only the
   # backend containers can reach it (at http://ollama:11434). Download a model once with:
@@ -143,6 +173,14 @@ services:
       OLLAMA_KV_CACHE_TYPE: q8_0  # conversation memory at half size, with negligible quality loss
     volumes:
       - ollama_models:/root/.ollama   # downloaded models survive restarts and updates
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    labels:
+      autoheal: "true"
     deploy:
       resources:
         limits:
@@ -154,6 +192,21 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  # Watchdog: restarts any container labelled autoheal=true that Docker reports as unhealthy
+  # (its healthcheck failed 3 times in a row). Restarts are listed by: docker logs caic-autoheal
+  # It needs the Docker socket to restart containers, so it can control Docker: it runs no
+  # other code and publishes no port.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: caic-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 30
+      AUTOHEAL_START_PERIOD: 120
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   postgres_data:

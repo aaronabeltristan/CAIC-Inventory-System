@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { fmtStamp } from "../utils/format";
-import Avatar, { squarePhoto } from "./Avatar";
+import Avatar from "./Avatar";
+import { squarePhoto } from "../utils/squarePhoto";
 import MyActivity from "./MyActivity";
 import SecurityInfo from "./SecurityInfo";
 import MyStats from "./MyStats";
@@ -194,6 +195,7 @@ function NameEditor({ api, user, profile, isAdmin, onChanged }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [openedAt] = useState(() => Date.now()); // "recent" is counted in days, so this is close enough
 
   const name = profile?.name || user.name;
   const req = profile?.name_request;
@@ -201,7 +203,7 @@ function NameEditor({ api, user, profile, isAdmin, onChanged }) {
   const recentlyRejected =
     req?.status === "rejected" &&
     req.reviewed_at &&
-    Date.now() - new Date(req.reviewed_at).getTime() < RECENT_DAYS * 86400000;
+    openedAt - new Date(req.reviewed_at).getTime() < RECENT_DAYS * 86400000;
 
   async function run(action) {
     setBusy(true);

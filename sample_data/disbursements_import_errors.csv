@@ -16,6 +16,7 @@ Plant 2 Missing PO Test,,,2026-10-14,990014,New Project Without PO Trading,2500.
 Plant 3 Half PO Test,99000003,,2026-10-15,990015,PO Amount Missing Trading,2500.00
 Plant 4 Mixed PO Test,99000004,90000.00,2026-10-16,990016,First PO Trading,1200.00
 Plant 4 Mixed PO Test,99000044,90000.00,2026-10-17,990017,Different PO Trading,1300.00
-Plant 5 Shared PO Test,99000001,75000.00,2026-10-18,990018,PO Of Another Project Trading,900.00
+Plant 5 Shared PO Test,99000005,75000.00,2026-10-18,990018,Same PO As Plant 8 Trading,900.00
+Plant 8 Shared PO Test,99000005,76000.00,2026-10-21,990021,Same PO As Plant 5 Trading,950.00
 Plant 6 Bad PO Test,9900 0006 !!,60000.00,2026-10-19,990019,Invalid PO Number Trading,800.00
 Plant 7 Bad PO Amount Test,99000007,zero,2026-10-20,990020,Text PO Amount Trading,700.00

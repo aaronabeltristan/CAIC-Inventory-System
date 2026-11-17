@@ -29,8 +29,11 @@ const SIGNED_OUT_ELSEWHERE =
 export default function Dashboard({ api, user: sessionUser, onLogout, onSessionEnded = onLogout }) {
   // Sign-ins from other devices waiting for this device to allow or block them
   const [loginRequests, setLoginRequests] = useState([]);
+  const [toast, setToast] = useState("");
   const shownRequestRef = useRef(null); // the request the prompt is showing
-  shownRequestRef.current = loginRequests[0]?.id ?? null;
+  useEffect(() => {
+    shownRequestRef.current = loginRequests[0]?.id ?? null;
+  }, [loginRequests]);
   const loadLoginRequests = useCallback(
     () =>
       api.myLoginChallenges
@@ -82,13 +85,15 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
   const [userSection, setUserSection] = useState(null);
   const [panelKey, setPanelKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
-  const [toast, setToast] = useState("");
   const [liveStatus, setLiveStatus] = useState("connecting");
   const [liveVersion, setLiveVersion] = useState(0); // bumps on every change, so open windows reload
+  // For the live-updates handler below, which is set up once
   const profileIdRef = useRef(null);
-  profileIdRef.current = profile?.id ?? null;
   const loadLoginRequestsRef = useRef(loadLoginRequests);
-  loadLoginRequestsRef.current = loadLoginRequests;
+  useEffect(() => {
+    profileIdRef.current = profile?.id ?? null;
+    loadLoginRequestsRef.current = loadLoginRequests;
+  }, [profile, loadLoginRequests]);
   // Badge counts. Admins: requests and password resets waiting. Staff: answers not yet seen.
   const [pending, setPending] = useState({ requests: 0, resets: 0, accounts: 0, names: 0, responses: 0 });
   // Bumped after the user's answers are marked as read, so the badge is counted again. Each
@@ -103,45 +108,41 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
     api.getSettings?.().then((s) => setAppSettings(s.values), () => {});
   }, [api, liveVersion]);
 
-  const loadEntries = useCallback(async () => {
-    try {
-      const [rows, projectList] = await Promise.all([
-        api.listDisbursements(),
-        api.listProjects(),
-      ]);
-      setEntries(rows);
-      setProjects(projectList);
-      setError("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [api]);
+  const loadEntries = useCallback(
+    () =>
+      Promise.all([api.listDisbursements(), api.listProjects()])
+        .then(
+          ([rows, projectList]) => {
+            setEntries(rows);
+            setProjects(projectList);
+            setError("");
+          },
+          (e) => setError(e.message)
+        )
+        .finally(() => setLoading(false)),
+    [api]
+  );
 
   const fetchSummary = useCallback(
-    async (title) => {
-      const id = ++reqId.current;
-      if (!title) {
-        setSummary(null);
-        setSummaryLoading(false);
-        return;
-      }
-      setSummaryLoading(true);
-      try {
-        const s = await api.getSummary(title);
-        if (id === reqId.current) {
-          setSummary(s);
-          setError("");
-        }
-      } catch (e) {
-        if (id === reqId.current) {
-          setSummary(null);
-          setError(e.message);
-        }
-      } finally {
-        if (id === reqId.current) setSummaryLoading(false);
-      }
+    (title) => {
+      const id = ++reqId.current; // also cancels a summary still loading for another project
+      if (!title) return Promise.resolve();
+      const latest = () => id === reqId.current;
+      return api
+        .getSummary(title)
+        .then(
+          (s) => {
+            if (!latest()) return;
+            setSummary(s);
+            setError("");
+          },
+          (e) => {
+            if (!latest()) return;
+            setSummary(null);
+            setError(e.message);
+          }
+        )
+        .finally(() => latest() && setSummaryLoading(false));
     },
     [api]
   );
@@ -150,8 +151,15 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
     loadEntries();
   }, [loadEntries]);
 
-  useEffect(() => {
+  // Another project (or none): clear the old summary straight away, while rendering, so it's
+  // never shown under the new title
+  const [summaryView, setSummaryView] = useState(view);
+  if (summaryView !== view) {
+    setSummaryView(view);
     setSummary(null);
+    setSummaryLoading(!!view);
+  }
+  useEffect(() => {
     fetchSummary(view);
   }, [view, fetchSummary]);
 
@@ -161,7 +169,10 @@ export default function Dashboard({ api, user: sessionUser, onLogout, onSessionE
     return () => clearTimeout(t);
   }, [toast]);
 
-  const refresh = () => Promise.all([loadEntries(), fetchSummary(view)]);
+  const refresh = () => {
+    if (view) setSummaryLoading(true);
+    return Promise.all([loadEntries(), fetchSummary(view)]);
+  };
 
   // Admins: how many archive/edit requests and password resets are waiting. New requests,
   // approvals and rejections all arrive as live updates, so this refreshes on its own.

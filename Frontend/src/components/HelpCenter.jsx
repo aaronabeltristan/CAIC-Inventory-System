@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { CATEGORIES, GUIDES } from "../help/guides";
 import { daysLabel, useRetentionDays } from "../hooks/useRetentionDays";
 
@@ -152,10 +152,13 @@ export default function HelpCenter({ user, onGo }) {
   }, [mine, q, cat]);
   const doneCount = mine.filter((g) => done.has(g.id)).length;
 
-  // Searching: open the guide straight away when only one matches
-  useEffect(() => {
-    if (q.trim() && shown.length === 1) setOpen(shown[0].id);
-  }, [q, shown]);
+  // Searching: open the guide straight away when only one matches (once, so it can be closed)
+  const onlyMatch = q.trim() && shown.length === 1 ? shown[0].id : null;
+  const [autoOpened, setAutoOpened] = useState(null);
+  if (onlyMatch !== autoOpened) {
+    setAutoOpened(onlyMatch);
+    if (onlyMatch) setOpen(onlyMatch);
+  }
 
   return (
     <>

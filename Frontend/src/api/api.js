@@ -21,6 +21,18 @@ const UPDATE_METHOD = "PATCH";
 export const logoUrl = (version) =>
   version ? `${API_URL}/settings/logo?v=${encodeURIComponent(version)}` : null;
 
+// Error codes shown to people (explained in docs/DIAGNOSTICS.md). Codes from the server's own
+// checks look like E-DB-01; unexpected server errors carry an ID like E-1A2B3C4D.
+const NO_CONNECTION =
+  "Can't reach the server (E-NET-01). Check your connection; if others have the same problem, the server may be off.";
+function failureMessage(status) {
+  if (status === 502 || status === 504)
+    return `The server isn't answering (E-NET-02, HTTP ${status}). It may be restarting: try again in a minute.`;
+  if (status === 503) return "The server is up but its database isn't (E-DB-01, HTTP 503). Tell an admin.";
+  if (status === 413) return "That file is too large for the server (HTTP 413).";
+  return `Request failed (HTTP ${status}).`;
+}
+
 export class ApiError extends Error {
   constructor(message, status) {
     super(message);
@@ -46,7 +58,7 @@ async function http(path, { method = "GET", body, form, upload, token } = {}) {
   try {
     res = await fetch(API_URL + path, { method, headers, body: payload });
   } catch {
-    throw new ApiError("Can't reach the server. Check your connection and that the API is running.", 0);
+    throw new ApiError(NO_CONNECTION, 0);
   }
 
   if (!res.ok) {
@@ -57,7 +69,7 @@ async function http(path, { method = "GET", body, form, upload, token } = {}) {
     } catch {
       /* body wasn't JSON */
     }
-    throw new ApiError(detail || `Request failed (${res.status}).`, res.status);
+    throw new ApiError(detail || failureMessage(res.status), res.status);
   }
   return res.status === 204 ? null : res.json();
 }
@@ -146,7 +158,7 @@ export function createApi(tokenSource, onUnauthorized) {
           headers: { Authorization: `Bearer ${currentToken()}` },
         });
       } catch {
-        throw new ApiError("Can't reach the server. Check your connection and that the API is running.", 0);
+        throw new ApiError(NO_CONNECTION, 0);
       }
       if (!res.ok) {
         if (res.status === 401 && onUnauthorized) onUnauthorized();
@@ -268,6 +280,8 @@ export function createApi(tokenSource, onUnauthorized) {
       call(`/me/activity?page=${page}&size=${size}&signins=${signins}`),
     mySecurity: () => call("/me/security"),
     backupStatus: () => call("/backup-status"),
+    // Admins: every part of the system with ok / warn / fail / off and a code (Settings → Status)
+    healthDetails: () => call("/health/details"),
     myStats: () => call("/me/stats"),
     signOutEverywhere: () => call("/me/sign-out-everywhere", { method: "POST" }),
     cancelNameRequest: () => call("/me/name", { method: "DELETE" }),
@@ -301,7 +315,7 @@ export function createApi(tokenSource, onUnauthorized) {
         });
       } catch (e) {
         if (e.name === "AbortError") throw e;
-        throw new ApiError("Can't reach the server. Check your connection and that the API is running.", 0);
+        throw new ApiError(NO_CONNECTION, 0);
       }
       if (!res.ok) {
         if (res.status === 401 && onUnauthorized) onUnauthorized();
@@ -312,7 +326,7 @@ export function createApi(tokenSource, onUnauthorized) {
         } catch {
           /* body wasn't JSON */
         }
-        throw new ApiError(detail || `Request failed (${res.status}).`, res.status);
+        throw new ApiError(detail || failureMessage(res.status), res.status);
       }
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = "";

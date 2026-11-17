@@ -41,6 +41,7 @@ This README covers the `feature/settings-and-purchase-orders` branch (which incl
    - 4.22 Purchase orders (PO) on projects
    - 4.23 PO and CV numbers: numbers only
    - 4.24 Search and filters
+   - 4.25 Diagnostics (status lights, error codes, logs, watchdogs): see [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md); fault tests in [docs/FAULT_TESTS.md](docs/FAULT_TESTS.md)
 5. [Database changes](#5-database-changes)
 6. [API reference](#6-api-reference)
 7. [Activity Log action reference](#7-activity-log-action-reference)
@@ -463,7 +464,7 @@ Deactivating is usually better than deleting: if a deleted username is registere
 Test files are in `sample_data/`:
 
 - `disbursements_import_sample.csv`: 100 projects, 829 valid rows, ₱159M. Each project has a PO number (`20250001` … `20260100`) and a PO amount about 18% above what it spent; CV numbers run `250001` … `260415`.
-- `disbursements_import_errors.csv`: 20 rows covering every check above, including the PO rules (new project without a PO, missing PO amount, two PO numbers in one project, a PO of another project, a PO with letters, a text PO amount). The row with CV `250001` is reported as "already exists" once the sample has been imported.
+- `disbursements_import_errors.csv`: 21 rows (4 valid, 17 with problems) covering every check above, including the PO rules (new project without a PO, missing PO amount, two PO numbers in one project, two projects giving the same PO, a PO with letters, a text PO amount). The row with CV `250001` is reported as "already exists" once the sample has been imported.
 - `PO_20250001_sample.pdf`: a sample purchase order (marked SAMPLE) for the first project, *Calamba Training Center Drainage Improvement*, PO 20250001, ₱1,030,000.00, to try **Edit PO** and **View PDF**.
 
 A CSV can't hold the PO files: after an import, attach each project's PDF with **Edit PO**. **Excel caution:** opening and saving a CSV in Excel drops leading zeros (`000123` → `123`) and may write long numbers as `2.03E+07`; edit in a text editor or format those columns as Text first.
@@ -721,6 +722,16 @@ PO numbers and CV numbers are **digits only** (0-9), up to 30, leading zeros kep
 - The "nothing found" message names the field: "No project title matches …", "No project has a payee matching …", "No PO number matches …".
 - In the project page, dates, CV numbers and amounts stay on one line.
 
+### 4.25 Diagnostics (November 17)
+
+How the system reports problems, and how to read each signal: **[docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)**. Fault tests that measure MTTD and MTTR: **[docs/FAULT_TESTS.md](docs/FAULT_TESTS.md)**, timed with `tools\fault-timer.ps1`.
+
+- **Settings → Status** (admins): a green / yellow / red / grey light for each part (database, backups, automatic clean-up, server errors, live updates, assistant), with a code (`E-DB-01`, `W-BK-02`…) and what to do. Refreshes every 30 s; **Copy report** copies a text summary.
+- **Health check:** `GET /health` (no sign-in; 200 or 503) and `GET /health/details` (admins). Code: `Backend/health.py`.
+- **Error IDs:** an unexpected server error gives the user an ID (`E-1A2B3C4D`), writes the traceback to the backend log under that ID, and adds a **Server error** row to the Activity Log.
+- **On-screen codes:** `E-NET-01` (no connection), `E-NET-02` (server not answering, 502/504), `E-DB-01` (503).
+- **Watchdogs:** Docker health checks on `caic-api`, `caic-assistant`, `caic-web` and `caic-ollama`; a new **`caic-autoheal`** container restarts any that turn unhealthy; the hourly clean-up records each run so the status shows if it stops.
+
 ## 5. Database changes
 
 All changes are applied automatically when the backend starts:
@@ -818,6 +829,13 @@ All changes are applied automatically when the backend starts:
 ## 6. API reference
 
 "Access" means: **public** (no sign-in), **user** (any signed-in user), **admin** (superuser only). Everything here can be tried in Swagger at `/docs`.
+
+### Health
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/health` | public | `{"status":"ok"}` (200), or 503 `{"status":"down","code":"E-DB-01"}`. Used by Docker's health check |
+| GET | `/health/details` | admin | Every component: `status` (ok / warn / fail / off), `detail`, `code`, `meaning`, `action`; plus the list of codes |
 
 ### Authentication and accounts
 
@@ -929,7 +947,8 @@ All changes are applied automatically when the backend starts:
 | `purge` | Deleted permanently | The automatic purge removes data after the retention period (actor `system`) | project / disbursement |
 | `project_po_update` | Changed PO | An admin adds or changes a project's PO | project |
 | `settings_update` | Changed settings | An admin saves settings, or changes the logo (old → new values) | settings |
-| `backup_requested` | — | An admin clicks **Back up now** | backup |
+| `backup_requested` | Backup requested | An admin clicks **Back up now** | backup |
+| `server_error` | Server error | An unexpected error in the backend; `details.error_id` matches the ID the user saw and the backend log (actor `system`) | system |
 | `register` | Registered | An account is created | user |
 | `login` / `login_failed` | Signed in / Failed sign-in | Sign-in attempts | user |
 | `password_change` | Changed password | Own password changed, or a temporary one replaced | user |
@@ -986,7 +1005,7 @@ All changes are applied automatically when the backend starts:
 | `install-autodeploy.ps1` | **new** | Turns automatic deploys on or off (Windows scheduled task) |
 | `loadtest/locustfile.py` | **new** | Load test: simulated staff, admins and assistant users |
 | `.gitignore` | changed | Ignores `.deploy/` |
-| `test.ps1` | **new** | Runs the automated backend tests in Docker with a throwaway database (section 10) |
+| `test.ps1` | **new**, revised Nov 17 | Checks the whole project in Docker: backend tests with a throwaway database, sample data, backup script, frontend build and lint report (section 10) |
 | `sample_data/*.csv` | changed (Nov 16) | New import format with `po_number`, `po_amount`; numbers-only PO and CV numbers; more error cases |
 | `sample_data/PO_20250001_sample.pdf` | **new (Nov 16)** | Sample PO for the first sample project |
 
@@ -1066,12 +1085,25 @@ All changes are applied automatically when the backend starts:
 `Backend/tests` holds about 230 automated tests of the backend's rules: sign-up and approval, sign-in and lockout, the one-device rule and its Allow/Block prompt, roles (staff are refused every admin action), entries and totals, requests and their review, archiving/restoring/permanent delete, the User Panel, Manage Users, Excel export, CSV import and the assistant's guards. Run them before every deploy, from the project folder:
 
 ```powershell
-.\test.ps1              # all tests, about 30 seconds after the first run
-.\test.ps1 -k sessions  # only tests with "sessions" in their name
-.\test.ps1 -x           # stop at the first failure
+.\test.ps1                 # everything: backend tests, sample data, backup script, frontend build + lint report
+.\test.ps1 -Backend        # only the backend tests and the backup script (fastest)
+.\test.ps1 -Frontend       # only the frontend build and lint
+.\test.ps1 -k sessions     # only backend tests with "sessions" in their name (frontend skipped)
+.\test.ps1 -x              # stop at the first failing backend test
+.\test.ps1 -- -v -k "settings and not logo"   # pytest options that PowerShell could mistake for its own go after --
+.\test.ps1 -StrictLint     # also fail on ESLint errors (off by default: some predate this work)
 ```
 
-- Needs only Docker Desktop. It starts its **own throwaway database** (`caic-test-db`) and removes it afterwards; the real database, the running app and `Backend\.env` are never used, so it's safe while the app is live.
+It ends with a summary table (Backend tests, Backup script, Frontend build, Frontend lint: passed / FAILED / warnings) and exits with 1 if anything failed, so it can be used before a deploy or in automation.
+
+| Check | What it does |
+|---|---|
+| Backend tests | `Backend/tests` with pytest, in `python:3.13-slim` (as the server), against a throwaway `postgres:16-alpine` database. Includes `test_sample_data.py`, which imports the files in `sample_data/` (829 rows / 100 projects; the errors file's 4 valid and 17 skipped rows; attaching the sample PO PDF) |
+| Backup script | `Backend/backup/backup.sh` has no shell syntax errors (`sh -n`) |
+| Frontend build | `npm ci` and `vite build` in `node:22-alpine`, as a deploy does. The source is copied inside the container (without your Windows `node_modules`), so nothing is written to the project |
+| Frontend lint | ESLint report. Shown but not counted unless `-StrictLint` |
+
+- Needs only Docker Desktop. It starts its **own throwaway database** (`caic-test-<number>-db`, on its own Docker network) and removes it afterwards, along with any left by an interrupted run; the real database, the running app and `Backend\.env` are never used, so it's safe while the app is live.
 - The tests empty every table before each test, so `tests/conftest.py` refuses to run unless the database name ends in `_test`.
 - The assistant tests replace the language model with a stand-in: they check the rules around it (which lookups each role gets, refusing attempts to get around the rules, hiding leaked instructions), not the quality of its answers.
 - Without Docker (a Python venv and any Postgres): `pip install -r Backend/requirements-dev.txt`, set `TEST_DATABASE_URL=postgresql+psycopg://postgres:<password>@localhost:5432/caic_db_test`, then run `python -m pytest -q` in `Backend`.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { createApi, DEMO } from "./api/api";
 import Login from "./components/Login";
@@ -8,6 +8,11 @@ import UpdateBanner from "./components/UpdateBanner";
 import { useSessionKeepAlive } from "./hooks/useSessionKeepAlive";
 import { getAppSettings, setAppSettings } from "./hooks/useAppSettings";
 
+// The api reads the newest token from here each time, so renewing the token in the background
+// doesn't rebuild the api (which would reload every screen). Every sign-in, renewal and
+// sign-out writes it here first.
+const currentToken = () => sessionStorage.getItem("token");
+
 const idleSignOut = () =>
   `You were signed out after ${getAppSettings().session_idle_minutes} minutes without activity. Sign in again to continue.`;
 
@@ -15,10 +20,6 @@ export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem("token") || (DEMO ? "demo" : null));
   const [user, setUser] = useState(null);
   const [signedOutReason, setSignedOutReason] = useState(""); // shown on the sign-in page
-  // The api reads the newest token through this, so renewing the token in the background
-  // doesn't rebuild the api (which would reload every screen)
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
   const signedIn = !!token;
 
   // The session ended (expired, signed in elsewhere, deactivated...). Shows why, if known.
@@ -33,7 +34,7 @@ export default function App() {
     );
   }, []);
 
-  const api = useMemo(() => createApi(() => tokenRef.current, logout), [signedIn, logout]); // eslint-disable-line react-hooks/exhaustive-deps
+  const api = useMemo(() => createApi(currentToken, logout), [signedIn, logout]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Company name, logo, currency and whether Create account / Forgot password are on: needed
   // before anyone signs in (Settings → Company / Security)
@@ -56,7 +57,6 @@ export default function App() {
   // Renew the sign-in while the person is active; sign out after 30 idle minutes
   const renewed = useCallback((fresh) => {
     sessionStorage.setItem("token", fresh);
-    tokenRef.current = fresh;
     setToken(fresh);
   }, []);
   const expired = useCallback(() => logout(idleSignOut()), [logout]);
@@ -76,8 +76,7 @@ export default function App() {
   }, [api, logout]);
 
   function acceptToken(accessToken) {
-    sessionStorage.setItem("token", accessToken);
-    tokenRef.current = accessToken; // so api calls made before the next render use it
+    sessionStorage.setItem("token", accessToken); // api calls made before the next render use it
     setSignedOutReason("");
     setToken(accessToken);
   }

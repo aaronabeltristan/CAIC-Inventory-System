@@ -1,0 +1,2 @@
+# Shell scripts run in Linux containers: always check them out with Unix line endings
+*.sh text eol=lf

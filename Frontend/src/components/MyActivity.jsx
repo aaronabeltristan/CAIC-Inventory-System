@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ACTION_LABEL } from "./ActivityLog";
+import { ACTION_LABEL } from "../utils/activityActions";
 
 const PAGE_SIZE = 20;
 
@@ -69,7 +69,6 @@ export default function MyActivity({ api, version }) {
   if (error && !items) return <p className="error">{error}</p>;
   if (!items) return <p className="muted">Loading…</p>;
 
-  let lastDay = null;
   return (
     <div className="log-body">
       {toggle}
@@ -82,10 +81,9 @@ export default function MyActivity({ api, version }) {
               <tr><th>Time</th><th>Action</th><th>Details</th></tr>
             </thead>
             <tbody>
-              {items.map((a) => {
+              {items.map((a, i) => {
                 const day = dayLabel(a.created_at);
-                const header = day !== lastDay;
-                lastDay = day;
+                const header = i === 0 || day !== dayLabel(items[i - 1].created_at); // first of its day
                 return (
                   <Fragment key={a.id}>
                     {header && (
