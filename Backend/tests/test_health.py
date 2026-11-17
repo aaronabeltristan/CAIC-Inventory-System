@@ -124,6 +124,9 @@ def test_stopped_backup_service_is_noticed_from_its_heartbeat(client, db, admin)
 def test_a_long_backup_is_not_mistaken_for_a_stopped_service(client, db, admin):
     activity.log(db, "system", "backup", "Backup saved", "backup")
     db.commit()
+    db.query(models.ActivityLog).filter_by(action="backup").update(
+        {"created_at": datetime.now(timezone.utc) - timedelta(hours=3)})   # the previous backup, earlier today
+    db.commit()
     _beat(db, "busy", 20)                                   # a backup has been running 20 minutes
     assert component(client, admin, "backups")["status"] == "ok"
     _beat(db, "busy", 70)                                   # far too long: something's wrong
