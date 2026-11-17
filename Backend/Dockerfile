@@ -8,11 +8,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY *.py ./
+COPY *.py log_config.json ./
 
 EXPOSE 8000
 # 1. "import auth" sets up/upgrades the database tables once, before the processes start
 #    (so several processes don't all try to create a new table at the same moment).
 # 2. WEB_WORKERS processes (docker-compose.yml) share the work across CPU cores.
+# --log-config: puts the date and time (Philippine time, TZ in docker-compose.yml) on every log line.
 # --timeout-graceful-shutdown: live-update connections stay open, so don't wait for them on restart.
-CMD ["sh", "-c", "python -c 'import auth' && exec uvicorn auth:app --host 0.0.0.0 --port 8000 --workers ${WEB_WORKERS:-1} --timeout-graceful-shutdown 3"]
+CMD ["sh", "-c", "python -c 'import auth' && exec uvicorn auth:app --host 0.0.0.0 --port 8000 --workers ${WEB_WORKERS:-1} --timeout-graceful-shutdown 3 --log-config log_config.json"]

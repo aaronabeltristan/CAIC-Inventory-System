@@ -1,5 +1,11 @@
+# Time shown in the containers' own log lines: Philippine time (UTC+8). Written as a POSIX rule
+# ("PHT-8" = 8 hours ahead of UTC, no daylight saving) because it needs no time-zone files, which
+# the slim/alpine images don't have. (The times added by "docker logs -t" are always UTC.)
+x-log-tz: &log-tz "PHT-8"
+
 # Settings shared by the two backend containers (api and assistant)
 x-backend-env: &backend-env
+  TZ: *log-tz
   # Signs sign-in tokens. Kept in Backend/.env (not committed); see .env.example
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in Backend/.env (copy Backend/.env.example)}
   # "db" is the database container below; the backend reaches it inside Docker
@@ -30,7 +36,9 @@ services:
     container_name: postgres-db
     restart: unless-stopped
     # Room for every backend process's connection pool plus developers (default is 100)
-    command: ["postgres", "-c", "max_connections=200"]
+    # log_timezone: Philippine time in this database's log. (Only the log: the time zone the
+    # app's data is stored and compared in is left as it is.)
+    command: ["postgres", "-c", "max_connections=200", "-c", "log_timezone=Asia/Manila"]
     environment:
       POSTGRES_USER: postgres
       # Only used when the database is first created. To change it later, see README (Secrets)
@@ -115,6 +123,8 @@ services:
         APP_BUILT: ${APP_BUILT:-}
     container_name: caic-web
     restart: unless-stopped
+    environment:
+      TZ: *log-tz             # nginx's request log in Philippine time
     ports:
       - "0.0.0.0:80:80"
     depends_on:
@@ -166,6 +176,7 @@ services:
     container_name: caic-ollama
     restart: unless-stopped
     environment:
+      TZ: Asia/Manila             # Philippine time in its log (a Go program: needs the zone's name)
       OLLAMA_KEEP_ALIVE: 30m      # keep the model loaded for 30 minutes after the last question
       OLLAMA_NUM_PARALLEL: 1      # one answer at a time keeps memory use low
       # Use less graphics memory, so more of the model fits on a 4 GB GPU
@@ -202,6 +213,7 @@ services:
     container_name: caic-autoheal
     restart: unless-stopped
     environment:
+      TZ: *log-tz                 # "Container ... restarted" lines in Philippine time
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: 30
       AUTOHEAL_START_PERIOD: 120

@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
+import logtime  # noqa: F401  (first: date and time on the app's own log lines)
 import crud
 import database
 import models

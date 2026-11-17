@@ -127,6 +127,8 @@ If the database was down at the time, step 3 can't be written: the log line
 
 ## 4. Logs
 
+Every container writes its log times in **Philippine time (UTC+8)**: the backend's lines start with the date and time (`2026-11-18 00:57:03 INFO: ...`), and the web server, database, AI model and watchdog logs use the same time zone (`TZ` in `Backend/docker-compose.yml`). Only the extra time that `docker logs -t` adds in front is UTC (it ends in `Z`), because Docker itself always records UTC; leave out `-t`.
+
 | Log | How to open it | What's in it | Kept |
 |---|---|---|---|
 | **Activity Log** | User Panel → Activity Log (admins). Filter by action, user, record type, text | Every action (who, what, when, old → new values), sign-ins and failed sign-ins, imports and exports, **Server error** rows with their error ID, backup results, settings changes | Forever, unless *Delete routine Activity Log rows after* is set (Settings → System); changes to records are always kept |
