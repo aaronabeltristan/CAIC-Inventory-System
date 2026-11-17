@@ -25,6 +25,14 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
   const staffEdit = mode === "edit" && !user.is_superuser;
   const asRequest = staffEdit && needsApproval;
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  // Editing: nothing to save or send until at least one value differs from the entry
+  const unchanged =
+    mode === "edit" &&
+    form.date === entry.date &&
+    form.cv_no.trim() === entry.cv_no &&
+    form.payee.trim() === entry.payee &&
+    form.amount !== "" &&
+    cents(form.amount) === cents(entry.amount);
 
   async function submit(e) {
     e.preventDefault();
@@ -145,6 +153,8 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
               : `Added by ${entry.created_by_name || entry.created_by} on ${fmtStamp(entry.created_at)}. Your name will be recorded as the editor.`}
         </p>
 
+        {unchanged && <p className="hint">No changes yet. Change a value to {asRequest ? "send a request" : "save"}.</p>}
+
         {error && (
           <p role="alert" className="error">
             {error}
@@ -154,7 +164,11 @@ export default function EntryDialog({ mode, entry, defaultProject, user, onSave,
           <button type="button" className="pill" onClick={() => ref.current.close()}>
             Cancel
           </button>
-          <button className="pill primary" disabled={busy}>
+          <button
+            className="pill primary"
+            disabled={busy || unchanged}
+            title={unchanged ? "Change a value first" : undefined}
+          >
             {busy
               ? asRequest ? "Sending…" : "Saving…"
               : mode === "create" ? "Add record" : asRequest ? "Send request" : "Save changes"}
