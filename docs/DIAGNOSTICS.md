@@ -15,6 +15,10 @@ Fault tests that measure how fast these signals lead to a fix are in [FAULT_TEST
 5. [Watchdogs](#5-watchdogs)
 6. [Where to start: symptom → first check](#6-where-to-start-symptom--first-check)
 7. [Command reference](#7-command-reference)
+8. [Step-by-step repairs: start, restart or wait](#8-step-by-step-repairs-start-restart-or-wait)
+9. [Backups and restoring](#9-backups-and-restoring)
+
+The same content, with more explanation, is in the printable guide [CAIC_Diagnostics_Guide.pdf](CAIC_Diagnostics_Guide.pdf).
 
 ---
 
@@ -200,3 +204,109 @@ docker restart caic-api                         # restart the backend (a few sec
 docker start postgres-db                        # start a stopped container
 Get-Content .deploy\deploy.log -Tail 20         # last deploys (project folder)
 ```
+
+---
+
+## 8. Step-by-step repairs: start, restart or wait
+
+Find the situation that matches and do the steps **in order**; stop when the *Done when* line is true.
+
+### 8.1 The one rule
+
+Look first: `docker compose -p backend ps`, then act on what the box's line says.
+
+| You see for the box | Meaning | Do |
+|---|---|---|
+| **Line missing** (or Exited) | Stopped. Docker won't start it by itself (stopped by hand, or crashed and gave up) | `docker start <box>`, wait 15–30 s |
+| **Restarting** / **(health: starting)** | Already coming back | **Wait** 1–2 min; don't interrupt it |
+| **(unhealthy)** | Running but failing its health check; autoheal restarts it within ~2 min | **Wait** 2 min; still unhealthy → read its log, then `docker restart <box>` |
+| **Up (healthy)** but the app still fails | Stuck, or holding an old broken connection (e.g. after the database came back) | `docker restart <box>` |
+| **Several missing** | Docker restarted, or many boxes stopped | Start all (below) |
+
+```powershell
+# Starts every stopped box; running ones are left alone, so it's always safe
+docker start postgres-db caic-api caic-assistant caic-web caic-ollama caic-backup caic-autoheal
+```
+
+> **Never** run `docker compose down -v`, `docker volume rm` or `docker system prune --volumes`: they **delete the database**.
+
+### 8.2 Nobody can open the app (E-NET-01 for everyone)
+1. Server on, awake and signed in to Windows? (Docker Desktop only runs while someone is signed in.)
+2. Docker Desktop running (whale icon)? If not, start it and wait 1–2 min.
+3. `docker compose -p backend ps`: caic-web missing → `docker start caic-web`; several missing → start all.
+4. `http://localhost` works on the server but not elsewhere → network: `tailscale status`, `tailscale up`.
+5. Only one person affected → their computer/connection.
+
+*Done when:* the app opens on the server and another computer; `curl.exe http://localhost/api/health` says ok.
+
+### 8.3 App opens, every action fails (E-NET-02)
+1. `docker compose -p backend ps` → caic-api.
+2. Missing/Exited → `docker start caic-api`, wait 15–30 s.
+3. Restarting / (health: starting) → wait 1–2 min.
+4. (unhealthy) > 2 min, or healthy but still failing → `docker logs caic-api --tail 40`, then `docker restart caic-api`.
+5. Log mentions the database (*connection refused*) → go to 8.4.
+6. Keeps failing at start-up → save the log (`docker logs caic-api > api-log.txt 2>&1`) and redeploy (8.9).
+
+*Done when:* health ok, sign-in and opening a project work, Status green.
+
+### 8.4 Database (E-DB-01)
+1. `docker compose -p backend ps` → postgres-db.
+2. Missing/Exited → `docker start postgres-db`; wait for **(healthy)** (10–20 s).
+3. Won't start → `docker logs postgres-db --tail 30`; *No space left on device* = disk full: free space, start again.
+4. Database healthy but actions still fail → `docker restart caic-api caic-assistant`.
+
+Autoheal restarting caic-api while the database is down is expected; fix the database first.
+
+*Done when:* health ok, a project opens, Status → Database green.
+
+### 8.5 Backup light (W-BK-02/03/04, E-BK-01)
+1. **W-BK-04 / W-BK-03** → `docker start caic-backup`; within a minute: *service alive … ago*.
+2. **W-BK-02** → start it as above, then Settings → System → **Back up now**.
+3. **E-BK-01** → read the reason (or `docker logs caic-backup --tail 20`): database down (8.4); disk/folder full or missing (free space); BACKUP_PASSPHRASE missing (put the **same** one back in `Backend\.env`, run `.\deploy.ps1`).
+4. Click **Back up now**, wait a minute.
+
+*Done when:* Activity Log shows a new *Backup saved* row; Status → Backups green.
+
+### 8.6 Assistant (E-AI-01, W-AI-02)
+1. Grey = turned off (Settings → System → Chat assistant).
+2. E-AI-01 → `docker start caic-ollama` (and `docker start caic-assistant` if missing).
+3. W-AI-02 → pull the model (section 3.1).
+4. First answer after a start is slow; that's normal.
+
+### 8.7 One action fails with an error ID
+Look up the ID (3.3). A box problem → its section above. Same record fails every time → a bug: send the ID, steps and log block to the developer; restarting won't fix it.
+
+### 8.8 After a power cut / Windows restart
+1. Sign in to Windows; wait for Docker Desktop (1–2 min), then 2 more minutes.
+2. `docker compose -p backend ps`: a box stopped **by hand** before the restart stays stopped → `docker start <box>` or start all.
+3. Daily check. A missed nightly backup runs by itself.
+
+### 8.9 Nothing worked: redeploy
+1. Save logs (`docker logs <box> > <box>-log.txt 2>&1`); a redeploy clears them.
+2. Project folder: `.\deploy.ps1` (rebuilds and starts every box; the data is kept in the database volume).
+3. Daily check.
+
+---
+
+## 9. Backups and restoring
+
+A backup is a full, encrypted copy of the database: projects, POs and PO files, entries, users, settings, logo, Activity Log. Not included: the code (GitHub) and `Backend\.env` (keep your own copy; without **BACKUP_PASSPHRASE** no backup can be opened).
+
+| When | Folder | Kept (default) |
+|---|---|---|
+| Daily at the backup hour (Settings → System), or as soon as the server is on if missed | `backups\daily` | 7 |
+| Weekly copy | `backups\weekly` | 4 |
+| Monthly copy | `backups\monthly` | 6 |
+| Back up now, `.\backup.ps1`, before a restore | `backups\manual` | all |
+
+**Back up now:** Settings → System → **Back up now**, or `.\backup.ps1 -Label before-import`.
+
+**Restore** (on the server, project folder; not in the app on purpose). For a single deleted project, use the **Archive** in the app instead.
+
+```powershell
+.\restore.ps1 -List                                                     # 1. list backups
+.\restore.ps1 -File daily\caic_db_2026-11-18_020000.dump.gpg            # 2. test: into caic_db_restore, real data untouched
+.\restore.ps1 -File daily\caic_db_2026-11-18_020000.dump.gpg -ReplaceLive   # 3. replace the real data (type YES)
+```
+
+Step 3 backs up the current data to `backups\manual` first, keeps the old database as `caic_db_replaced_<date>`, and restarts the backend. Everything goes back to the moment of that backup; people may need to sign in again. Test a restore (steps 1–2) once a month.
