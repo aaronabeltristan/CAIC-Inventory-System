@@ -178,6 +178,7 @@ schedule() {
       log "backup requested from the app"
       heartbeat busy
       wait_for_db && backup "$MANUAL" requested
+      heartbeat idle    # done: back to the 3-minute limit straight away
     fi
     today=$(date +%Y-%m-%d)
     hour=$(date +%H)
@@ -193,6 +194,7 @@ schedule() {
       else
         last_fail=$now
       fi
+      heartbeat idle
     fi
     sleep 60
   done

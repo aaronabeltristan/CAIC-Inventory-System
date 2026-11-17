@@ -133,7 +133,12 @@ def check_backups(db: Session) -> dict:
     # this check is skipped rather than raising a false alarm.
     beat = db.get(models.AppSetting, BACKUP_HEARTBEAT_KEY)
     if beat is not None and beat.updated_at is not None:
-        limit = BACKUP_BUSY_MINUTES if beat.value == "busy" else BACKUP_HEARTBEAT_MINUTES
+        # "busy" allows a long backup, but only while it's still running: once a backup result
+        # newer than the "busy" beat exists, it finished, so the normal limit applies again
+        # (otherwise a service stopped right after a backup looked fine for an hour)
+        newest = max((_aware(r[0]) for r in (ok, failed) if r), default=None)
+        still_busy = beat.value == "busy" and not (newest and newest >= _aware(beat.updated_at))
+        limit = BACKUP_BUSY_MINUTES if still_busy else BACKUP_HEARTBEAT_MINUTES
         if now - _aware(beat.updated_at) > timedelta(minutes=limit):
             return _component("backups", "Backups", "warn",
                               f"No sign of life from the backup service since {_ago(beat.updated_at)}", "W-BK-04")

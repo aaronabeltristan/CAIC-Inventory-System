@@ -135,3 +135,15 @@ def test_without_any_heartbeat_the_check_is_skipped(client, db, admin):
     activity.log(db, "system", "backup", "Backup saved", "backup")
     db.commit()
     assert component(client, admin, "backups")["status"] == "ok"
+
+
+def test_service_stopped_right_after_a_backup_is_still_noticed(client, db, admin):
+    """Found in fault test F3: the service said "busy", made the backup, and was stopped before
+    saying "idle" again, so Status allowed it 60 minutes instead of 3."""
+    _beat(db, "busy", 5)                                    # "busy" 5 minutes ago...
+    activity.log(db, "system", "backup", "Backup saved: manual/x.gpg", "backup")
+    db.commit()
+    db.query(models.ActivityLog).filter_by(action="backup").update(
+        {"created_at": datetime.now(timezone.utc) - timedelta(minutes=4)})   # ...finished 4 minutes ago
+    db.commit()
+    assert component(client, admin, "backups")["code"] == "W-BK-04"
