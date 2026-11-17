@@ -87,10 +87,14 @@ while ($true) {
     if ([Console]::KeyAvailable) {
         $key = [Console]::ReadKey($true).Key
         if ($key -eq "Q") { Write-Host "Stopped; nothing recorded."; exit 1 }
-        if ($key -eq "D" -and -not $detected) {
+        if ($key -eq "D" -and -not $detected -and $monitorUp -and $Fault -ne "backup" -and $Fault -ne "assistant") {
+            Write-Host "  The system was already healthy again at $(Stamp $monitorUp): D now would give wrong times." -ForegroundColor Red
+            Write-Host "  Press Q and run this test again (press D when the problem is noticed, before repairing)." -ForegroundColor Red
+        }
+        elseif ($key -eq "D" -and -not $detected) {
             $detected = Get-Date
             Write-Host "  $(Stamp $detected)  DETECTED (+$([math]::Round(($detected - $t0).TotalSeconds, 1)) s)" -ForegroundColor Yellow
-            $signal = Read-Host "  How was it noticed? (e.g. E-NET-02 on screen, Status red E-DB-01, Live dot)"
+            do { $signal = Read-Host "  How was it noticed? (e.g. E-NET-02 on screen, Status red E-DB-01, Live dot)" } while (-not $signal.Trim())
             Write-Host "  Now repair it. Press R when the app works again."
         }
         elseif ($key -eq "R" -and $detected) {
